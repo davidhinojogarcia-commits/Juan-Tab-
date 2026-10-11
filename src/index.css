@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    
+    /* Paleta inspirada en el diseño moderno de referencia:
+       - Fondo general gris-azulado suave: #EEF2F6
+       - Azul petróleo profundo institucional: #283949 / #2F4154
+       - Tarjeta Hero azul pizarra suave: #4A677E / #3B556C
+       - Tarjeta de Acento melocotón/albaricoque cálido: #FDF0E7 con terracota #DE6C38
+       - Barras y acentos azul petróleo medio: #36799C
+       - Tarjetas blanco puro: #FFFFFF con bordes sutiles #DFE6ED y esquinas redondeadas
+       - Textos en pizarra marino de alto contraste: #1C2E3D y secundario #6C7D8E */
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    
+    --cadiz-petrol: #283949;
+    --cadiz-petrol-dark: #1E2D3B;
+    --cadiz-blue: #0063A2;
+    --cadiz-blue-mid: #36799C;
+    --cadiz-hero-from: #4A677E;
+    --cadiz-hero-to: #395368;
+    --cadiz-warm-bg: #FDF0E7;
+    --cadiz-warm-border: #F5DACB;
+    --cadiz-terracotta: #DE6C38;
+    
+    --app-bg: #EEF2F6;
+    --card-bg: #FFFFFF;
+    --card-border: #DFE6ED;
+    --text-primary: #1C2E3D;
+    --text-muted: #6C7D8E;
+    --frest-shadow: 0 4px 20px 0 rgba(28, 46, 61, 0.06);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--app-bg);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    /* iOS & Android touch optimizations */
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    overscroll-behavior-y: none;
+  }
+
+  .dark body {
+    background-color: #121922;
+    color: #E2E8F0;
+  }
+
+  /* Safe-area insets for notched phones (iPhone Dynamic Island / Notch, Android cutouts) */
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+  .pl-safe {
+    padding-left: max(0.5rem, env(safe-area-inset-left));
+  }
+  .pr-safe {
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+  }
+
+  /* Smooth touch momentum scrolling on mobile */
+  .touch-pan-y-momentum {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Monospace y tabular numbers para importes y porcentajes */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  /* Frest Card & Soft Shadow */
+  .frest-card {
+    background-color: #FFFFFF;
+    border-radius: 0.875rem;
+    box-shadow: 0 4px 18px 0 rgba(71, 95, 123, 0.07);
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    transition: all 0.2s ease-in-out;
+  }
+
+  .dark .frest-card {
+    background-color: #1E2738;
+    box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+  }
+
+  .frest-card:hover {
+    box-shadow: 0 6px 24px 0 rgba(71, 95, 123, 0.12);
+  }
+
+  .dark .frest-card:hover {
+    box-shadow: 0 6px 24px 0 rgba(0, 0, 0, 0.35);
+  }
+
+  /* Custom scrollbar limpio y sutil */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 9999px;
+  }
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #334155;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+}

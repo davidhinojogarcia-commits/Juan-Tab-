@@ -1,0 +1,6 @@
+{
+  "name": "ADL1.0",
+  "description": "Planifica v1.0 - Gestión Integral de Planes, Programas y Convenios del Área de Desarrollo Local de la Diputación Provincial de Cádiz.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

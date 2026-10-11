@@ -1,0 +1,66 @@
+{
+  "id": "/",
+  "name": "ADL (versión 1.1) - Diputación de Cádiz",
+  "short_name": "ADL Cádiz",
+  "description": "Plataforma de revisión técnica de actuaciones y control de justificaciones del Área de Desarrollo Local de la Diputación Provincial de Cádiz.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#121824",
+  "theme_color": "#5A8DEE",
+  "orientation": "any",
+  "categories": [
+    "productivity",
+    "government",
+    "business"
+  ],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Planes Provinciales",
+      "short_name": "Planes",
+      "description": "Ver planes provinciales y convocatorias",
+      "url": "/?vista=planes",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Actuaciones y Verificación",
+      "short_name": "Actuaciones",
+      "description": "Listado de expedientes y listas de verificación",
+      "url": "/?vista=actuaciones",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Cuadro de Mando Presupuestario",
+      "short_name": "Mando",
+      "description": "Cuadro consolidado de liquidación y plazos",
+      "url": "/?vista=dashboard",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    }
+  ]
+}
