@@ -31,7 +31,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
   const {
     configuracion,
     actualizarConfiguracion,
-    forzarSincronizacion,
     reiniciarDatosFabrica
   } = useApp();
 
@@ -201,7 +200,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
           <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
               <Shield className="w-4 h-4 text-emerald-600" />
-              <span>Seguridad, Biometría y Cifrado Extremo a Extremo</span>
+              <span>Seguridad (pendiente de conectar con un servidor)</span>
             </h3>
 
             <div className="space-y-2">
@@ -211,15 +210,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                     Cifrado de Extremo a Extremo (E2EE - AES-GCM 256)
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Garantiza la protección de la propiedad intelectual, privacidad de expedientes e inviolabilidad del código.
+                    No activo: los datos actuales se almacenan localmente sin cifrado de extremo a extremo.
                   </span>
                 </div>
                 <input
                   type="checkbox"
-                  checked={configuracion.cifradoExtremoAExtremo}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ cifradoExtremoAExtremo: e.target.checked })
-                  }
+                  checked={false}
+                  disabled
+                  aria-label="Función pendiente de integración"
                   className="w-4 h-4 rounded text-blue-600"
                 />
               </label>
@@ -230,15 +228,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                     Autenticación Biométrica (WebAuthn / TouchID / FaceID)
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Acceso rápido y seguro mediante huella o reconocimiento facial de la Diputación de Cádiz.
+                    No disponible hasta integrar un proveedor de autenticación real.
                   </span>
                 </div>
                 <input
                   type="checkbox"
-                  checked={configuracion.autenticacionBiometrica}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ autenticacionBiometrica: e.target.checked })
-                  }
+                  checked={false}
+                  disabled
+                  aria-label="Función pendiente de integración"
                   className="w-4 h-4 rounded text-blue-600"
                 />
               </label>
@@ -254,10 +251,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                 </div>
                 <input
                   type="checkbox"
-                  checked={configuracion.autenticacion2FA}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ autenticacion2FA: e.target.checked })
-                  }
+                  checked={false}
+                  disabled
+                  aria-label="Función pendiente de integración"
                   className="w-4 h-4 rounded text-blue-600"
                 />
               </label>
@@ -315,25 +311,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
           <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
               <Cloud className="w-4 h-4 text-blue-600" />
-              <span>Sincronización en la Nube y Almacenamiento Local</span>
+              <span>Almacenamiento local (sin sincronización en la nube)</span>
             </h3>
 
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <div>
                 <span className="font-semibold text-slate-900 dark:text-white block">
-                  Sincronización Automática entre Múltiples Dispositivos
+                  Sincronización entre dispositivos: no disponible
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Transmisión instantánea de datos y soporte para modo offline completo.
+                  Los datos se guardan en este navegador. No se transmiten a un servidor.
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => forzarSincronizacion()}
-                className="px-3 py-1.5 rounded-xl bg-blue-700 text-white font-bold text-xs"
-              >
-                Sincronizar Ya
-              </button>
+              <span className="px-3 py-1.5 rounded-xl bg-slate-200 text-slate-700 font-bold text-xs" aria-label="Sincronización no disponible">
+                No disponible
+              </span>
             </div>
 
             {/* Zona de peligro / Reinicio de fábrica */}
