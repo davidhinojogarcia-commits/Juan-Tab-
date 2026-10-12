@@ -58,7 +58,7 @@ const MainContent: React.FC = () => {
           <div className="bg-amber-100 border-b border-amber-300 text-amber-950 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-2xs">
             <WifiOff className="w-4 h-4 text-amber-700 animate-pulse" />
             <span>
-              Modo Offline Completo Activo · Todos los datos se guardan con cifrado local y se sincronizarán al recuperar la conexión a la red de la Diputación.
+              Sin conexión: los cambios se guardan únicamente en este navegador. No hay sincronización con servidor configurada.
             </span>
           </div>
         )}
@@ -119,7 +119,7 @@ const MainContent: React.FC = () => {
             <div className="flex items-center gap-4 text-[11px] text-slate-400">
               <span>Sede Electrónica Oficial</span>
               <span className="text-slate-200">·</span>
-              <span>Planifica v1.0 · Sesión Segura</span>
+              <span>Planifica v1.0 · Modo local sin autenticación verificada</span>
             </div>
           </div>
         </footer>
