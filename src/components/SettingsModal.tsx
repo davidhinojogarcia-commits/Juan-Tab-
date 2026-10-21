@@ -207,66 +207,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
           <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
               <Shield className="w-4 h-4 text-emerald-600" />
-              <span>Seguridad, Biometría y Cifrado Extremo a Extremo</span>
+              <span>Sesión y almacenamiento</span>
             </h3>
 
             <div className="space-y-2">
-              <label className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 cursor-pointer">
-                <div>
-                  <span className="font-semibold text-slate-900 dark:text-white block">
-                    Cifrado de Extremo a Extremo (E2EE - AES-GCM 256)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Garantiza la protección de la propiedad intelectual, privacidad de expedientes e inviolabilidad del código.
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={configuracion.cifradoExtremoAExtremo}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ cifradoExtremoAExtremo: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-blue-600"
-                />
-              </label>
-
-              <label className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 cursor-pointer">
-                <div>
-                  <span className="font-semibold text-slate-900 dark:text-white block">
-                    Autenticación Biométrica (WebAuthn / TouchID / FaceID)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Acceso rápido y seguro mediante huella o reconocimiento facial de la Diputación de Cádiz.
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={configuracion.autenticacionBiometrica}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ autenticacionBiometrica: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-blue-600"
-                />
-              </label>
-
-              <label className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 cursor-pointer">
-                <div>
-                  <span className="font-semibold text-slate-900 dark:text-white block">
-                    Autenticación de Dos Factores (2FA Obligatoria)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Doble validación de seguridad mediante código numérico de 6 dígitos.
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={configuracion.autenticacion2FA}
-                  onChange={(e) =>
-                    actualizarConfiguracion({ autenticacion2FA: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded text-blue-600"
-                />
-              </label>
+              <p className="p-3 rounded-xl bg-slate-50 text-slate-700">
+                La sesión se verifica con Firebase Authentication y los permisos con la ficha de miembro.
+                Esta integración no ofrece biometría, 2FA ni cifrado extremo a extremo configurables desde este panel.
+                Los borradores se conservan en el almacenamiento del navegador.
+              </p>
 
               {/* Firma Electrónica del Dispositivo */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
@@ -294,7 +243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
           <div className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-2">
               <Smartphone className="w-4 h-4 text-[#0063A2] dark:text-sky-400" />
-              <span>Compatibilidad Móvil Certificada (Apple iOS y Google Android)</span>
+              <span>Uso en móviles (Apple iOS y Google Android)</span>
             </h3>
 
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 space-y-3">
@@ -304,7 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                     Aplicación Web Progresiva PWA (iOS 14.3+ y Android 7.0+)
                   </span>
                   <span className="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                    Instalación sin tiendas de aplicaciones, funcionamiento sin conexión con Service Worker v2, optimización para notch de iPhone, Dynamic Island y navegación por gestos de Android.
+                    La instalación depende del navegador. Los borradores de una sesión cargada se conservan sin conexión; abrir la app desde cero requiere red.
                   </span>
                 </div>
                 <button
@@ -327,7 +276,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                 </div>
                 <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#39DA8A]" />
-                  <span>Caché Offline Completa (Service Worker)</span>
+                  <span>Borradores locales (IndexedDB)</span>
                 </div>
                 <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#39DA8A]" />
@@ -350,7 +299,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                   Sincronización Automática entre Múltiples Dispositivos
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Transmisión instantánea de datos y soporte para modo offline completo.
+                  Los cambios pendientes se conservan en este dispositivo; el servidor confirma cada guardado.
                 </span>
               </div>
               <button
@@ -370,7 +319,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                   Copia de Seguridad y Migración a Firebase
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  Descarga tus datos locales en JSON o conéctate a Cloud Firestore para desarrollo compartido.
+                  Descarga una copia e importa los datos antiguos al espacio compartido vacío.
                 </span>
               </div>
               <button
@@ -435,6 +384,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
         </div>
       </div>
 
+      <ModalMigracionFirebase mostrar={mostrarModalMigracion} onCerrar={() => setMostrarModalMigracion(false)} />
       {modalCertificadoAbierto && (
         <ModalCertificadoDispositivo
           mostrar={modalCertificadoAbierto}

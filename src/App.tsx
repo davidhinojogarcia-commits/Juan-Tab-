@@ -1,3 +1,4 @@
+import { WorkspaceProvider } from './sync/Workspace';
 import React, { useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
@@ -62,7 +63,7 @@ const MainContent: React.FC = () => {
           <div className="bg-amber-100 border-b border-amber-300 text-amber-950 px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-2xs">
             <WifiOff className="w-4 h-4 text-amber-700 animate-pulse" />
             <span>
-              Modo Offline Completo Activo · Todos los datos se guardan con cifrado local y se sincronizarán al recuperar la conexión a la red de la Diputación.
+              Sin conexión · Consulta el estado de guardado antes de cerrar. Los cambios pendientes se enviarán al recuperar la conexión.
             </span>
           </div>
         )}
@@ -225,9 +226,6 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   handleReset = () => {
-    try {
-      sessionStorage.clear();
-    } catch {}
     window.location.reload();
   };
 
@@ -248,13 +246,13 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
               </p>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
-              Se ha asegurado la sesión para <strong>Juan Hinojo García</strong> (Jefe de Servicio). Pulsa el botón para recargar la interfaz con todos los datos actualizados.
+              No se ha podido mostrar la aplicación. Recarga para volver a comprobar la sesión de Firebase; los borradores locales se conservarán.
             </p>
             <button
               onClick={this.handleReset}
               className="w-full py-3 px-4 rounded-xl bg-[#004F90] hover:bg-[#003B71] text-white font-black text-xs shadow-md transition"
             >
-              Cargar Aplicación y Restaurar Sesión
+              Recargar aplicación
             </button>
           </div>
         </div>
@@ -267,9 +265,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppProvider>
+      <WorkspaceProvider><AppProvider>
         <MainContent />
-      </AppProvider>
+      </AppProvider></WorkspaceProvider>
     </ErrorBoundary>
   );
 }
