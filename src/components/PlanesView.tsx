@@ -10,7 +10,11 @@ import {
   FolderKanban,
   CheckCircle2,
   AlertCircle,
-  Edit
+  Edit,
+  Archive,
+  Trash2,
+  RotateCcw,
+  ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PlanSubvencion } from '../types';
@@ -24,7 +28,14 @@ interface PlanesViewProps {
 }
 
 export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
-  const { planes } = useApp();
+  const {
+    planes,
+    planesPapelera,
+    usuarioActual,
+    abrirModalPapelera
+  } = useApp();
+
+  const esAdmin = usuarioActual?.rol === 'administrador' || usuarioActual?.rol === 'jefe_servicio' || !!usuarioActual?.permisos?.puedeEditarPlanes;
 
   // Estados de navegación interna de la página PLANES:
   // 'lista' = Vista principal requerida
@@ -76,7 +87,6 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
         const coincideTexto =
           !busqueda.trim() ||
           plan.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-          plan.codigo.toLowerCase().includes(busqueda.toLowerCase()) ||
           String(plan.ejercicio).includes(busqueda);
         return coincideAno && coincideTexto;
       })
@@ -166,15 +176,34 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
           </div>
         </div>
 
-        {/* A la derecha: UN SOLO BOTÓN de Dar de Alta un nuevo plan */}
-        <button
-          type="button"
-          onClick={() => setVista('alta')}
-          className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#004F90] hover:bg-[#003B71] text-white text-xs font-black shadow-xs transition shrink-0 active:scale-[0.98]"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Dar de Alta un nuevo plan</span>
-        </button>
+        {/* A la derecha: Botones de acción */}
+        <div className="flex items-center gap-2.5 flex-wrap self-stretch sm:self-auto justify-end">
+          {esAdmin && (
+            <button
+              type="button"
+              onClick={abrirModalPapelera}
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-300 hover:border-slate-400 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold shadow-2xs transition shrink-0"
+              title="Papelera de reciclaje global · Custodia de planes eliminados durante 30 días"
+            >
+              <Archive className="w-4 h-4 text-amber-600" />
+              <span>Papelera de Planes</span>
+              {planesPapelera.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-black border border-amber-300">
+                  {planesPapelera.length}
+                </span>
+              )}
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setVista('alta')}
+            className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#004F90] hover:bg-[#003B71] text-white text-xs font-black shadow-xs transition shrink-0 active:scale-[0.98]"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Dar de Alta un nuevo plan</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. DEBAJO DE ESTO: BUSCADOR DE PLANES CON FILTROS POR AÑO */}
@@ -186,7 +215,7 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
             type="text"
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar plan por nombre o código..."
+            placeholder="Buscar plan por nombre o anualidad..."
             className="w-full bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden"
           />
           {busqueda && (
@@ -238,7 +267,6 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
               <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[10px] uppercase tracking-wider">
                 <th className="py-3.5 px-3.5 text-center w-20">Anualidad</th>
                 <th className="py-3.5 px-4 min-w-[240px]">Nombre del Plan</th>
-                <th className="py-3.5 px-3 text-center w-24">Vigencia</th>
                 <th className="py-3.5 px-4 text-right min-w-[130px]">Importe</th>
                 <th className="py-3.5 px-4 min-w-[170px]">Plazo Máx. de Ejecución</th>
                 <th className="py-3.5 px-4 min-w-[170px]">Plazo Máx. Justificación</th>
@@ -249,7 +277,7 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
             <tbody className="divide-y divide-slate-100">
               {planesFiltradosYOrdenados.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500 text-xs">
+                  <td colSpan={7} className="p-8 text-center text-slate-500 text-xs">
                     No se encontraron planes con los filtros seleccionados.
                   </td>
                 </tr>
@@ -280,7 +308,7 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
                         </div>
                       </td>
 
-                      {/* 2. NOMBRE DEL PLAN */}
+                      {/* 2. NOMBRE DEL PLAN + VIGENCIA EN CHIQUITITO SUSTITUYENDO LA REFERENCIA */}
                       <td className="py-3.5 px-4 align-middle">
                         <div
                           className="font-black text-slate-900 text-xs sm:text-sm group-hover:text-[#004F90] transition leading-snug"
@@ -288,27 +316,21 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
                         >
                           {plan.nombre}
                         </div>
-                        {plan.codigo && (
-                          <span className="font-mono text-[10px] text-slate-400 block mt-0.5">
-                            {plan.codigo}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              plan.activo
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-500 border border-slate-200'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${plan.activo ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                            {plan.activo ? 'Vigente' : 'No vigente'}
                           </span>
-                        )}
+                        </div>
                       </td>
 
-                      {/* 3. VIGENCIA */}
-                      <td className="py-3.5 px-3 text-center align-middle whitespace-nowrap">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider ${
-                            plan.activo
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-slate-100 text-slate-600 border border-slate-300'
-                          }`}
-                        >
-                          {plan.activo ? 'Vigente' : 'Cerrado'}
-                        </span>
-                      </td>
-
-                      {/* 4. IMPORTE */}
+                      {/* 3. IMPORTE */}
                       <td className="py-3.5 px-4 text-right align-middle whitespace-nowrap">
                         <span className="font-mono font-black text-slate-900 text-xs sm:text-sm">
                           {formatearMoneda(plan.presupuestoTotal)}
@@ -387,6 +409,11 @@ export const PlanesView: React.FC<PlanesViewProps> = ({ onAbrirActuacion }) => {
           plan={planAEditar}
           mostrar={!!planAEditar}
           onCerrar={() => setPlanAEditar(null)}
+          onPlanEliminado={() => {
+            setPlanAEditar(null);
+            setMensajeExito('El plan ha sido eliminado correctamente y se ha guardado una copia en la Papelera de Planes.');
+            setTimeout(() => setMensajeExito(null), 5000);
+          }}
         />
       )}
     </div>

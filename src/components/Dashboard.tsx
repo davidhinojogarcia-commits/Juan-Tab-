@@ -28,6 +28,8 @@ import { formatearMoneda, formatearFecha, formatearPorcentaje } from '../utils/p
 import { exportarTodasActuacionesCSV } from '../utils/csvExport';
 import { calcularDiasRestantes } from '../utils/notifications';
 import { DashboardWidget } from './DashboardWidget';
+import { DistribucionMunicipiosChart } from './DistribucionMunicipiosChart';
+import { ResumenActuacionesD3 } from './ResumenActuacionesD3';
 import { CadizLogo } from './CadizLogo';
 
 interface DashboardProps {
@@ -208,7 +210,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAbrirActuacion }) => {
             </div>
 
             <p className="mt-4 text-xs text-[#475569] max-w-2xl leading-relaxed">
-              Supervisión consolidada de los planes provinciales (PCM 2024-2025, PIC 2026, PCM+ 2026 y PI 2027), control de plazos perentorios y certificación reglamentaria de liquidaciones Base 14.
+              Supervisión consolidada de los planes provinciales de inversión, control de plazos perentorios y certificación reglamentaria de liquidaciones Base 14.
             </p>
           </div>
 
@@ -296,8 +298,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAbrirActuacion }) => {
         </div>
       </div>
 
+      {/* COMPONENTE D3: ESTADO GLOBAL DE LAS ACTUACIONES (PENDIENTES, EN REVISIÓN, APROBADAS) POR ANUALIDAD */}
+      <ResumenActuacionesD3 onVerActuaciones={() => onAbrirActuacion('')} />
+
       {/* WIDGET RECHARTS: ESTADO CONSOLIDADO DE EJECUCIÓN PRESUPUESTARIA */}
       <DashboardWidget />
+
+      {/* COMPONENTE RECHARTS: DISTRIBUCIÓN DE IMPORTES SUBVENCIONADOS POR MUNICIPIO Y ESTADOS DE LIQUIDACIÓN */}
+      <DistribucionMunicipiosChart
+        onSeleccionarMunicipio={(mun) => {
+          const actMun = actuaciones.find((a) => a.entidadLocal === mun);
+          if (actMun) {
+            onAbrirActuacion(actMun.id);
+          }
+        }}
+      />
 
       {/* 2. FILA PRINCIPAL: ANALÍTICA A LA IZQUIERDA + METRICAS A LA DERECHA */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -780,7 +795,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAbrirActuacion }) => {
                 <tr key={planItem.nombre} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
                   <td className="py-3 px-4">
                     <span className="font-bold text-[#1C2E3D] dark:text-white block">{planItem.nombre}</span>
-                    <span className="text-[10px] text-[#6C7D8E] font-mono">{planItem.codigo}</span>
                   </td>
                   <td className="py-3 px-4 text-center">
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-[#283949] dark:text-sky-300 border border-slate-200 dark:border-slate-700">
@@ -842,13 +856,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onAbrirActuacion }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {estadisticas.urgencias.map(({ actuacion, diasEjec, diasJust, minDias }) => {
+            {estadisticas.urgencias.map(({ actuacion, diasEjec, diasJust, minDias }, idx) => {
               const esVencido = minDias < 0;
               const esCritico = minDias <= 30;
 
               return (
                 <div
-                  key={actuacion.id}
+                  key={`${actuacion.id}-${idx}`}
                   onClick={() => onAbrirActuacion(actuacion.id)}
                   className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
                     esVencido

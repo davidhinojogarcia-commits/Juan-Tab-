@@ -1,0 +1,199 @@
+{
+  "entities": {
+    "plan": {
+      "title": "Plan de Subvenciones",
+      "description": "Plan provincial, programa o convenio de subvenciones del Área de Desarrollo Local de Diputación de Cádiz",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador único del plan" },
+        "codigo": { "type": "string", "description": "Código identificativo oficial de la convocatoria" },
+        "nombre": { "type": "string", "description": "Denominación íntegra y oficial del plan" },
+        "denominacion": { "type": "string", "description": "Denominación pública de la convocatoria" },
+        "descripcion": { "type": "string", "description": "Objeto y descripción de la convocatoria de subvenciones" },
+        "ejercicio": { "type": "number", "description": "Anualidad o ejercicio presupuestario (ej: 2026)" },
+        "anualidad": { "type": "number", "description": "Anualidad presupuestaria" },
+        "estado": { "type": "string", "description": "Estado de vigencia: borrador, aprobado, en_ejecucion, cerrado" },
+        "presupuestoTotal": { "type": "number", "description": "Presupuesto total consignado en euros" },
+        "plazoEjecucionMaximo": { "type": "string", "description": "Plazo límite ordinario de ejecución (YYYY-MM-DD)" },
+        "plazoJustificacionMaximo": { "type": "string", "description": "Plazo límite ordinario de justificación Base 14 (YYYY-MM-DD)" },
+        "plazoEjecucionAmpliado": { "type": "string", "description": "Plazo ampliado de ejecución si procede" },
+        "plazoJustificacionAmpliado": { "type": "string", "description": "Plazo ampliado de justificación si procede" },
+        "fechas": { "type": "object", "description": "Fechas clave: aprobación en pleno, publicación BOP, plazos" },
+        "eellBeneficiarias": { "type": "array", "description": "Entidades locales beneficiarias de la provincia de Cádiz" },
+        "actuacionesPrevistas": { "type": "array", "description": "Relación de actuaciones previstas aprobadas en bases" },
+        "observaciones": { "type": "string", "description": "Observaciones y notas administrativas" },
+        "historicoCambios": { "type": "array", "description": "Histórico cronológico de modificaciones y versiones del plan" },
+        "fechaCreacion": { "type": "string", "description": "Fecha de alta en el sistema (ISO 8601)" },
+        "activo": { "type": "boolean", "description": "Indica si la convocatoria está vigente o cerrada" },
+        "esPublico": { "type": "boolean", "description": "Visibilidad para consulta pública ciudadana" }
+      },
+      "required": ["id", "codigo", "nombre", "ejercicio", "presupuestoTotal", "activo"]
+    },
+    "actuacion": {
+      "title": "Actuación Provincial y Expediente de Obra",
+      "description": "Expediente de obra o servicio financiado por un plan provincial con sus 5 datos de cabecera y trazabilidad íntegra",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador único de la actuación (ej: ACT-2026-001)" },
+        "numero": { "type": "string", "description": "Número de actuación (Dato de cabecera 1)" },
+        "entidadLocal": { "type": "string", "description": "Entidad local beneficiaria (Dato de cabecera 2)" },
+        "nifEntidad": { "type": "string", "description": "NIF oficial de la entidad local beneficiaria" },
+        "titulo": { "type": "string", "description": "Denominación de la actuación (Dato de cabecera 3)" },
+        "denominacion": { "type": "string", "description": "Denominación formal del proyecto u obra" },
+        "aplicacionPresupuestaria": { "type": "string", "description": "Aplicación presupuestaria provincial (Dato de cabecera 4)" },
+        "subvencionSolicitada": { "type": "number", "description": "Subvención solicitada a Diputación (Dato de cabecera 5)" },
+        "plan": { "type": "string", "description": "Plan al que pertenece (nombre o código)" },
+        "planId": { "type": "string", "description": "Identificador del plan vinculado" },
+        "faseActual": { "type": "string", "description": "Fase administrativa: solicitud, ejecucion, justificacion" },
+        "estadoGeneral": { "type": "string", "description": "Estado de tramitación técnica y conformidad administrativa" },
+        "tecnicoAsignadoId": { "type": "string", "description": "ID del técnico responsable de la supervisión" },
+        "tecnicoAsignadoNombre": { "type": "string", "description": "Nombre completo del técnico responsable" },
+        "tecnicoAsignadoCargo": { "type": "string", "description": "Cargo oficial del técnico responsable" },
+        "plazos": { "type": "object", "description": "Plazos oficiales de inicio, ejecución y justificación" },
+        "importes": { "type": "object", "description": "Presupuesto, subvención concedida, aportación municipal y adjudicación" },
+        "documentos": { "type": "array", "description": "Documentos preceptivos Base 14 con su checklist, metadatos y calificación" },
+        "expediente": { "type": "object", "description": "Datos del expediente administrativo de contratación y licitación" },
+        "certificaciones": { "type": "array", "description": "Relación cronológica de certificaciones de obra emitidas" },
+        "facturas": { "type": "array", "description": "Facturas justificativas de gasto vinculadas a la actuación" },
+        "modificados": { "type": "array", "description": "Modificados de proyecto en orden cronológico con afección de plazos e importes" },
+        "liquidacion": { "type": "object", "description": "Cuadro de liquidación económica definitiva" },
+        "historico": { "type": "array", "description": "Trazabilidad cronológica de tramitación y cambios de estado" },
+        "fechaCreacion": { "type": "string", "description": "Fecha de alta en el sistema (ISO 8601)" },
+        "fechaModificacion": { "type": "string", "description": "Última fecha de modificación (ISO 8601)" },
+        "esPublico": { "type": "boolean", "description": "Indicador de visibilidad para portal de consulta pública" }
+      },
+      "required": ["id", "numero", "plan", "entidadLocal", "titulo", "plazos", "importes", "documentos", "estadoGeneral"]
+    },
+    "usuario": {
+      "title": "Usuario del Sistema",
+      "description": "Perfil de usuario del Área de Desarrollo Local con rol y matriz granular de permisos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "UID de autenticación o ID institucional" },
+        "nombre": { "type": "string", "description": "Nombre de pila" },
+        "apellidos": { "type": "string", "description": "Apellidos completos" },
+        "nif": { "type": "string", "description": "DNI/NIF del funcionario" },
+        "email": { "type": "string", "description": "Correo corporativo del usuario" },
+        "rol": { "type": "string", "description": "Rol: administrador, jefe_servicio, tecnico, administrativo, auditor, consulta" },
+        "departamento": { "type": "string", "description": "Departamento o servicio administrativo" },
+        "cargo": { "type": "string", "description": "Puesto o cargo oficial" },
+        "telefono": { "type": "string", "description": "Teléfono corporativo" },
+        "activo": { "type": "boolean", "description": "Estado de cuenta activa o deshabilitada" },
+        "permisos": { "type": "object", "description": "Matriz granular de permisos por módulo" },
+        "ultimoAcceso": { "type": "string", "description": "Última fecha de conexión registrada" }
+      },
+      "required": ["id", "nombre", "apellidos", "email", "rol", "activo"]
+    },
+    "auditoria": {
+      "title": "Registro de Auditoría Oficial",
+      "description": "Trazabilidad inmutable de accesos, operaciones, modificaciones y resultados",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador único del registro de auditoría" },
+        "fechaHora": { "type": "string", "description": "Fecha y hora del servidor (ISO 8601)" },
+        "usuarioId": { "type": "string", "description": "UID o identificador del usuario autenticado" },
+        "usuarioNombre": { "type": "string", "description": "Nombre y apellidos del usuario actuante" },
+        "usuarioEmail": { "type": "string", "description": "Correo del usuario actuante" },
+        "rol": { "type": "string", "description": "Rol del usuario en el momento de la operación" },
+        "operacion": { "type": "string", "description": "Operación administrativa: alta, modificacion, borrado, calificacion, exportacion" },
+        "accion": { "type": "string", "description": "Descripción formal de la acción" },
+        "registroAfectado": { "type": "string", "description": "Identificador o clave del registro afectado" },
+        "coleccionAfectada": { "type": "string", "description": "Colección Firestore afectada: planes, actuaciones, usuarios" },
+        "actuacionId": { "type": "string", "description": "Expediente o actuación vinculada si procede" },
+        "documentoId": { "type": "string", "description": "Documento específico afectado si procede" },
+        "documentoTitulo": { "type": "string", "description": "Título del documento o expediente" },
+        "cambiosRealizados": { "type": "string", "description": "Detalle pormenorizado de los cambios y campos modificados" },
+        "detalles": { "type": "string", "description": "Resumen técnico de la operación" },
+        "resultado": { "type": "string", "description": "Resultado de la operación: exito, error, advertencia" },
+        "ip": { "type": "string", "description": "Dirección IP o entorno de conexión" }
+      },
+      "required": ["id", "fechaHora", "usuarioId", "usuarioNombre", "operacion", "resultado"]
+    },
+    "comentario": {
+      "title": "Comentario o Instrucción Técnica",
+      "description": "Mensaje formal cursado entre el Jefe de Servicio y los técnicos sobre un expediente",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador del comentario" },
+        "actuacionId": { "type": "string", "description": "ID de la actuación de referencia" },
+        "actuacionNumero": { "type": "string", "description": "Número de la actuación" },
+        "actuacionTitulo": { "type": "string", "description": "Título de la actuación" },
+        "autorId": { "type": "string", "description": "ID del remitente" },
+        "autorNombre": { "type": "string", "description": "Nombre del remitente" },
+        "autorRol": { "type": "string", "description": "Rol del autor" },
+        "destinatarioId": { "type": "string", "description": "ID del técnico destinatario" },
+        "destinatarioNombre": { "type": "string", "description": "Nombre del técnico destinatario" },
+        "destinatarioEmail": { "type": "string", "description": "Email del técnico destinatario" },
+        "mensaje": { "type": "string", "description": "Contenido textual de la instrucción o consulta" },
+        "fechaHora": { "type": "string", "description": "Fecha y hora de envío (ISO 8601)" },
+        "enviadoPorEmail": { "type": "boolean", "description": "Notificación remitida por correo" },
+        "leido": { "type": "boolean", "description": "Estado de lectura" }
+      },
+      "required": ["id", "actuacionId", "autorId", "destinatarioId", "mensaje", "fechaHora"]
+    },
+    "notificacion": {
+      "title": "Notificación Oficial",
+      "description": "Aviso administrativo sobre vencimientos, subsanaciones o eventos clave",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID de la notificación" },
+        "titulo": { "type": "string", "description": "Título resumido del aviso" },
+        "mensaje": { "type": "string", "description": "Cuerpo del mensaje" },
+        "tipo": { "type": "string", "description": "Severidad: alerta, vencimiento, info, exito" },
+        "fechaHora": { "type": "string", "description": "Fecha y hora (ISO 8601)" },
+        "leida": { "type": "boolean", "description": "Marca de lectura" },
+        "actuacionId": { "type": "string", "description": "ID de la actuación relacionada si procede" }
+      },
+      "required": ["id", "titulo", "mensaje", "tipo", "fechaHora", "leida"]
+    },
+    "copiaPapelera": {
+      "title": "Copia de Seguridad en Papelera",
+      "description": "Plan provincial eliminado bajo periodo de custodia de 30 días",
+      "type": "object",
+      "properties": {
+        "idCopia": { "type": "string", "description": "ID único de la copia de seguridad" },
+        "fechaBorrado": { "type": "string", "description": "Fecha de eliminación (ISO 8601)" },
+        "fechaExpiracion": { "type": "string", "description": "Fecha límite tras 30 días naturales" },
+        "diasRetencion": { "type": "number", "description": "Días de retención configurados (30)" },
+        "borradoPorUsuario": { "type": "string", "description": "Nombre del administrador actuante" },
+        "plan": { "type": "object", "description": "Estructura completa del plan respaldado" },
+        "actuacionesAsociadas": { "type": "array", "description": "Relación de actuaciones vinculadas" }
+      },
+      "required": ["idCopia", "fechaBorrado", "fechaExpiracion", "diasRetencion", "plan"]
+    }
+  },
+  "firestore": {
+    "/planes/{planId}": {
+      "schema": "plan",
+      "description": "Colección de planes de subvenciones aprobados en pleno"
+    },
+    "/actuaciones/{actuacionId}": {
+      "schema": "actuacion",
+      "description": "Colección de actuaciones y expedientes de obras públicas provinciales"
+    },
+    "/usuarios/{usuarioId}": {
+      "schema": "usuario",
+      "description": "Perfiles y permisos de técnicos y administradores autorizados"
+    },
+    "/auditoria/{registroId}": {
+      "schema": "auditoria",
+      "description": "Libro de registro y auditoría inmutable de accesos y modificaciones"
+    },
+    "/registrosAuditoria/{registroId}": {
+      "schema": "auditoria",
+      "description": "Alias para libro de registro y auditoría inmutable de accesos y modificaciones"
+    },
+    "/comentarios/{comentarioId}": {
+      "schema": "comentario",
+      "description": "Instrucciones técnicas y comunicaciones internas sobre actuaciones"
+    },
+    "/notificaciones/{notificacionId}": {
+      "schema": "notificacion",
+      "description": "Bandeja de avisos y alertas institucionales del servicio"
+    },
+    "/papeleraPlanes/{copiaId}": {
+      "schema": "copiaPapelera",
+      "description": "Depósito de custodia de 30 días para planes eliminados"
+    }
+  }
+}

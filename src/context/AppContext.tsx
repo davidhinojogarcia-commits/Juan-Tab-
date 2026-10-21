@@ -14,7 +14,8 @@ import {
   ComentarioActuacion,
   ParticipanteRevision,
   RondaSubsanacion,
-  InformeFavorableDocumento
+  InformeFavorableDocumento,
+  CopiaSeguridadPlan
 } from '../types';
 import {
   ACTUACIONES_INICIALES,
@@ -29,6 +30,7 @@ import {
   verificarAlertasVencimientos,
   enviarNotificacionPushNativa
 } from '../utils/notifications';
+import { limpiarNombreEELL } from '../utils/eellUtils';
 
 interface AppContextType {
   // Datos
@@ -43,6 +45,7 @@ interface AppContextType {
   filtros: FiltrosBusqueda;
   configuracion: ConfiguracionUsuario;
   planes: PlanSubvencion[];
+  planesPapelera: CopiaSeguridadPlan[];
   comentarios: ComentarioActuacion[];
 
   // Estados de interfaz y red
@@ -54,6 +57,9 @@ interface AppContextType {
     documentoOrigenTitulo: string;
     destinoIndex: number;
   } | null;
+  modalPapeleraAbierto: boolean;
+  abrirModalPapelera: () => void;
+  cerrarModalPapelera: () => void;
 
   // Acciones de navegación
   seleccionarActuacion: (id: string | null) => void;
@@ -93,7 +99,11 @@ interface AppContextType {
   // Gestión de Planes de Subvenciones
   crearPlan: (plan: Omit<PlanSubvencion, 'id' | 'fechaCreacion'>) => PlanSubvencion;
   actualizarPlan: (plan: PlanSubvencion) => void;
-  eliminarPlan: (id: string) => void;
+  eliminarPlan: (id: string, guardarCopia?: boolean) => void;
+  restaurarPlan: (idCopia: string) => boolean;
+  eliminarCopiaDefinitiva: (idCopia: string) => void;
+  vaciarPapeleraPlanes: () => void;
+  purgarPlanesExpirados: () => number;
   generarActuacionesDesdePlan: (planId: string) => number;
   agregarActuacionAlPlan: (
     planId: string,
@@ -178,15 +188,32 @@ interface AppContextType {
 }
 
 const STORAGE_KEYS = {
-  ACTUACIONES: 'adl_cadiz_actuaciones_v1.1',
-  USUARIOS: 'adl_cadiz_usuarios_v1.1',
-  USUARIO_ACTUAL: 'adl_cadiz_usuario_activo_v1.1',
-  AUDITORIA: 'adl_cadiz_auditoria_v1.1',
-  CONFIG: 'adl_cadiz_config_v1.1',
-  NOTIFICACIONES: 'adl_cadiz_notificaciones_v1.1',
-  PLANES: 'adl_cadiz_planes_v1.1',
-  COMENTARIOS: 'adl_cadiz_comentarios_v1.1'
+  ACTUACIONES: 'adl_cadiz_actuaciones_v2',
+  USUARIOS: 'adl_cadiz_usuarios_v2',
+  USUARIO_ACTUAL: 'adl_cadiz_usuario_activo_v2',
+  AUDITORIA: 'adl_cadiz_auditoria_v2',
+  CONFIG: 'adl_cadiz_config_v2',
+  NOTIFICACIONES: 'adl_cadiz_notificaciones_v2',
+  PLANES: 'adl_cadiz_planes_v2',
+  PLANES_PAPELERA: 'adl_cadiz_planes_papelera_v2',
+  COMENTARIOS: 'adl_cadiz_comentarios_v2'
 };
+
+// Limpieza automática de claves anteriores que contenían datos de demostración o inventados
+if (typeof window !== 'undefined') {
+  try {
+    const viejasClaves = [
+      'adl_cadiz_actuaciones_v1.1',
+      'adl_cadiz_planes_v1.1',
+      'adl_cadiz_comentarios_v1.1',
+      'adl_cadiz_auditoria_v1.1',
+      'adl_cadiz_notificaciones_v1.1',
+      'adl_cadiz_actuaciones_v1',
+      'adl_cadiz_planes_v1'
+    ];
+    viejasClaves.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}
 
 const FILTROS_DEFECTO: FiltrosBusqueda = {
   plan: '',
@@ -199,7 +226,8 @@ const FILTROS_DEFECTO: FiltrosBusqueda = {
   ordenCronologico: 'desc',
   ano: '',
   aplicacionPresupuestaria: '',
-  importe: ''
+  importe: '',
+  tecnico: ''
 };
 
 const CONFIG_DEFECTO: ConfiguracionUsuario = {
@@ -247,6 +275,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: 'usr-jefe-1',
       nombre: 'Juan',
       apellidos: 'Hinojo García',
+      nif: '28765432Z',
       email: 'juan.tabu.oficial@gmail.com',
       rol: 'jefe_servicio',
       departamento: 'Área de Desarrollo Local',
@@ -290,7 +319,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const guardado = localStorage.getItem(STORAGE_KEYS.ACTUACIONES);
       if (guardado) {
         const parsed: Actuacion[] = JSON.parse(guardado);
-        return parsed.map((a, i) => {
+        const mapeados: Actuacion[] = parsed.map((a, i) => {
           let docs = a.documentos || [];
           const tieneSolicitud = docs.some((d) => d.codigo === 'ANX-I');
           if (!tieneSolicitud) {
@@ -368,18 +397,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             aplicacionPresupuestaria: a.aplicacionPresupuestaria || `202${4 + (i % 4)}-03-920-4620${i}`
           };
         });
+
+        // Garantizar que no existan IDs duplicados al cargar de LocalStorage
+        const idsVistos = new Set<string>();
+        return mapeados.map((act, idx) => {
+          let uId = act.id;
+          if (!uId || idsVistos.has(uId)) {
+            uId = `${uId || 'act'}-${idx + 1}`;
+          }
+          idsVistos.add(uId);
+          return { ...act, id: uId };
+        });
       }
-      return ACTUACIONES_INICIALES.map((a) => ({
-        ...a,
-        documentos: construirDocumentosCompletos(),
-        faseActual: 'solicitud'
-      }));
+      return [];
     } catch {
-      return ACTUACIONES_INICIALES.map((a) => ({
-        ...a,
-        documentos: construirDocumentosCompletos(),
-        faseActual: 'solicitud'
-      }));
+      return [];
     }
   });
 
@@ -417,30 +449,59 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const guardado = localStorage.getItem(STORAGE_KEYS.NOTIFICACIONES);
       if (guardado) return JSON.parse(guardado);
     } catch {}
-    return verificarAlertasVencimientos(actuaciones, 30);
+    return [];
   });
 
   // 8. Filtros
   const [filtros, setFiltros] = useState<FiltrosBusqueda>(FILTROS_DEFECTO);
 
-  // 9. Planes de Subvenciones (Asegurar que los 5 planes obligatorios siempre existan)
+  // 9. Planes de Subvenciones
   const [planes, setPlanes] = useState<PlanSubvencion[]>(() => {
     try {
       const guardado = localStorage.getItem(STORAGE_KEYS.PLANES);
       if (guardado) {
         const parsed: PlanSubvencion[] = JSON.parse(guardado);
-        const nombresExistentes = new Set(parsed.map((p) => p.nombre));
-        const faltantes = PLANES_INICIALES.filter((p) => !nombresExistentes.has(p.nombre));
-        if (faltantes.length > 0) {
-          return [...parsed, ...faltantes];
-        }
-        return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
-      return PLANES_INICIALES;
+      return [];
     } catch {
-      return PLANES_INICIALES;
+      return [];
     }
   });
+
+  // 9b. Papelera de Planes y Copias de Seguridad para recuperación (30 días de custodia)
+  const [planesPapelera, setPlanesPapelera] = useState<CopiaSeguridadPlan[]>(() => {
+    try {
+      const guardado = localStorage.getItem(STORAGE_KEYS.PLANES_PAPELERA);
+      if (guardado) {
+        const parsed: CopiaSeguridadPlan[] = JSON.parse(guardado);
+        if (Array.isArray(parsed)) {
+          const ahora = Date.now();
+          return parsed
+            .map((c) => ({
+              ...c,
+              diasRetencion: c.diasRetencion || 30,
+              fechaExpiracion:
+                c.fechaExpiracion ||
+                new Date(new Date(c.fechaBorrado).getTime() + (c.diasRetencion || 30) * 86400000).toISOString()
+            }))
+            .filter((c) => {
+              const exp = new Date(c.fechaExpiracion).getTime();
+              return exp > ahora;
+            });
+        }
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.PLANES_PAPELERA, JSON.stringify(planesPapelera));
+    } catch {}
+  }, [planesPapelera]);
 
   // 10. Comentarios y Notificaciones por Correo a Técnicos
   const [comentarios, setComentarios] = useState<ComentarioActuacion[]>(() => {
@@ -463,6 +524,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     documentoOrigenTitulo: string;
     destinoIndex: number;
   } | null>(null);
+
+  // 12b. Modal global de Papelera de Reciclaje (Custodia 30 días)
+  const [modalPapeleraAbierto, setModalPapeleraAbierto] = useState(false);
+  const abrirModalPapelera = () => setModalPapeleraAbierto(true);
+  const cerrarModalPapelera = () => setModalPapeleraAbierto(false);
 
   // Listeners de Red (Online / Offline)
   useEffect(() => {
@@ -607,9 +673,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             act = actuaciones.find((a) => a.id === prevista.actuacionGeneradaId);
           }
           if (!act) {
-            const eellNombre = prevista.entidadLocal.startsWith('Ayuntamiento')
-              ? prevista.entidadLocal
-              : `Ayuntamiento de ${prevista.entidadLocal}`;
+            const eellNombre = limpiarNombreEELL(prevista.entidadLocal) || 'Diputación de Cádiz';
             const nuevaActId = `ACT-${p.ejercicio}-${String(actuaciones.length + 1).padStart(3, '0')}`;
             const nuevaAct: Actuacion = {
               id: nuevaActId,
@@ -1677,7 +1741,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id,
       numero: datos.numero || String(actuaciones.length + 1).padStart(2, '0'),
       plan: datos.plan || 'Plan Cádiz Marcha 2024',
-      entidadLocal: datos.entidadLocal || 'Ayuntamiento de Grazalema',
+      entidadLocal: limpiarNombreEELL(datos.entidadLocal) || 'Grazalema',
       titulo: datos.titulo || 'Nueva Actuación de Infraestructuras',
       aplicacionPresupuestaria: datos.aplicacionPresupuestaria || '',
       plazos: datos.plazos || {
@@ -1763,8 +1827,128 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   };
 
-  const eliminarPlan = (id: string) => {
+  const eliminarPlan = (id: string, guardarCopia: boolean = true) => {
+    const planAEliminar = planes.find((p) => p.id === id);
+    if (!planAEliminar) return;
+
+    // Buscar las actuaciones vinculadas a este plan
+    const actuacionesAsociadas = actuaciones.filter(
+      (a) => a.plan === planAEliminar.nombre || (planAEliminar.codigo && a.plan === planAEliminar.codigo)
+    );
+
+    if (guardarCopia) {
+      const fechaActual = new Date();
+      const fechaExpiracion = new Date(fechaActual.getTime() + 30 * 86400000).toISOString();
+      const nuevaCopia: CopiaSeguridadPlan = {
+        idCopia: `copia-plan-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        fechaBorrado: fechaActual.toISOString(),
+        fechaExpiracion,
+        diasRetencion: 30,
+        borradoPorUsuario: usuarioActual ? `${usuarioActual.nombre} ${usuarioActual.apellidos}` : 'Administrador',
+        plan: planAEliminar,
+        actuacionesAsociadas
+      };
+      setPlanesPapelera((prev) => [nuevaCopia, ...prev.filter((c) => c.plan.id !== id)]);
+    }
+
+    // Eliminar de planes activos
     setPlanes((prev) => prev.filter((p) => p.id !== id));
+
+    // Eliminar las actuaciones asociadas huérfanas de la lista activa (quedan seguras en la copia)
+    if (actuacionesAsociadas.length > 0) {
+      setActuaciones((prev) =>
+        prev.filter((a) => a.plan !== planAEliminar.nombre && (!planAEliminar.codigo || a.plan !== planAEliminar.codigo))
+      );
+    }
+
+    registrarAccionAuditoria(
+      'acceso_pestana',
+      planAEliminar.id,
+      planAEliminar.nombre,
+      `Plan eliminado: ${planAEliminar.nombre}${guardarCopia ? ' (Copia guardada en Papelera de reciclaje durante 30 días)' : ''}`
+    );
+  };
+
+  const restaurarPlan = (idCopia: string): boolean => {
+    const copia = planesPapelera.find((c) => c.idCopia === idCopia);
+    if (!copia) return false;
+
+    // 1. Restaurar el plan a la lista activa
+    setPlanes((prev) => {
+      const existe = prev.some((p) => p.id === copia.plan.id);
+      if (existe) {
+        return prev.map((p) => (p.id === copia.plan.id ? copia.plan : p));
+      }
+      return [copia.plan, ...prev];
+    });
+
+    // 2. Restaurar sus actuaciones si existen
+    if (copia.actuacionesAsociadas && copia.actuacionesAsociadas.length > 0) {
+      setActuaciones((prev) => {
+        const idsExistentes = new Set(prev.map((a) => a.id));
+        const aReincorporar = copia.actuacionesAsociadas.filter((a) => !idsExistentes.has(a.id));
+        return [...prev, ...aReincorporar];
+      });
+    }
+
+    // 3. Quitar de la papelera
+    setPlanesPapelera((prev) => prev.filter((c) => c.idCopia !== idCopia));
+
+    registrarAccionAuditoria(
+      'acceso_pestana',
+      copia.plan.id,
+      copia.plan.nombre,
+      `Plan recuperado desde la papelera de reciclaje: ${copia.plan.nombre} con ${copia.actuacionesAsociadas?.length || 0} actuaciones.`
+    );
+
+    return true;
+  };
+
+  const eliminarCopiaDefinitiva = (idCopia: string) => {
+    const copia = planesPapelera.find((c) => c.idCopia === idCopia);
+    setPlanesPapelera((prev) => prev.filter((c) => c.idCopia !== idCopia));
+    if (copia) {
+      registrarAccionAuditoria(
+        'acceso_pestana',
+        copia.plan.id,
+        copia.plan.nombre,
+        `Borrado definitivo e irreversible del plan en papelera: ${copia.plan.nombre}`
+      );
+    }
+  };
+
+  const vaciarPapeleraPlanes = () => {
+    const total = planesPapelera.length;
+    setPlanesPapelera([]);
+    registrarAccionAuditoria(
+      'acceso_pestana',
+      'papelera-global',
+      'Papelera de reciclaje vaciada',
+      `Se han eliminado de forma definitiva ${total} planes almacenados en la papelera.`
+    );
+  };
+
+  const purgarPlanesExpirados = (): number => {
+    const ahora = Date.now();
+    let eliminados = 0;
+    setPlanesPapelera((prev) => {
+      const filtrados = prev.filter((copia) => {
+        const tExp = new Date(copia.fechaExpiracion || copia.fechaBorrado).getTime();
+        const expirado = ahora > tExp;
+        if (expirado) eliminados++;
+        return !expirado;
+      });
+      return filtrados;
+    });
+    if (eliminados > 0) {
+      registrarAccionAuditoria(
+        'acceso_pestana',
+        'papelera-global',
+        'Purga automática de planes expirados (>30 días)',
+        `Se han purgado automáticamente ${eliminados} planes cuyo periodo de 30 días de custodia ha vencido.`
+      );
+    }
+    return eliminados;
   };
 
   const generarActuacionesDesdePlan = (planId: string): number => {
@@ -1784,7 +1968,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         id: actId,
         numero: prevista.numero,
         plan: plan.nombre,
-        entidadLocal: prevista.entidadLocal,
+        entidadLocal: limpiarNombreEELL(prevista.entidadLocal),
         titulo: prevista.titulo,
         aplicacionPresupuestaria: prevista.aplicacionPresupuestaria || '',
         plazos: {
@@ -2260,9 +2444,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       const numRaw = parsedItem.numero || String(idx + 1).padStart(2, '0');
       const numFormatted = numRaw.replace(/^N[ºo°\.\s]*/i, '').trim();
       const rawEell = (parsedItem.entidadLocal || 'Diputación de Cádiz').trim();
-      const eellLimpia = rawEell
-        .replace(/^(ayuntamiento\s+de\s+|ayuntamiento\s+del\s+|ayto\.\s+de\s+|ayto\s+de\s+|ayto\.\s+|ayto\s+|diputación\s+de\s+|diputacion\s+de\s+|e\.l\.a\.\s+de\s+|ela\s+de\s+|e\.l\.m\.\s+de\s+|elm\s+de\s+)/i, '')
-        .trim() || rawEell;
+      const eellLimpia = limpiarNombreEELL(rawEell) || rawEell;
       eellSet.add(eellLimpia);
 
       const nuevaAct: Actuacion = {
@@ -2491,7 +2673,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const reiniciarDatosFabrica = () => {
     localStorage.removeItem(STORAGE_KEYS.ACTUACIONES);
     localStorage.removeItem(STORAGE_KEYS.AUDITORIA);
-    setActuaciones(ACTUACIONES_INICIALES);
+    localStorage.removeItem(STORAGE_KEYS.PLANES);
+    localStorage.removeItem(STORAGE_KEYS.COMENTARIOS);
+    localStorage.removeItem(STORAGE_KEYS.NOTIFICACIONES);
+    setActuaciones([]);
+    setPlanes([]);
+    setComentarios([]);
+    setNotificaciones([]);
     setRegistrosAuditoria([]);
     setActuacionActivaId(null);
   };
@@ -2541,6 +2729,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         crearPlan,
         actualizarPlan,
         eliminarPlan,
+        planesPapelera,
+        restaurarPlan,
+        eliminarCopiaDefinitiva,
+        vaciarPapeleraPlanes,
+        purgarPlanesExpirados,
         generarActuacionesDesdePlan,
         agregarActuacionAlPlan,
         editarActuacionDePlan,
@@ -2559,7 +2752,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         limpiarTodasNotificaciones,
         registrarAccionAuditoria,
         forzarSincronizacion,
-        reiniciarDatosFabrica
+        reiniciarDatosFabrica,
+        modalPapeleraAbierto,
+        abrirModalPapelera,
+        cerrarModalPapelera
       }}
     >
       {children}

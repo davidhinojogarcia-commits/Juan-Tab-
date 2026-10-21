@@ -36,7 +36,10 @@ import {
   copiarTextoAlPortapapeles,
   ENTIDADES_LOCALES_CADIZ,
   ActuacionReconocidaPDF,
-  DatosBasesPlenoExtraidos
+  DatosBasesPlenoExtraidos,
+  extraerActuacionesDeCualquierArchivo,
+  descargarPlantillaExcelActuaciones,
+  descargarPlantillaCSVActuaciones
 } from '../utils/pdfPlanParser';
 import { formatearMoneda, formatearFecha } from '../utils/pdfExport';
 
@@ -385,30 +388,32 @@ export const NuevoPlanView: React.FC<NuevoPlanViewProps> = ({ onVolver, onPlanCr
     setExitoF2(null);
 
     try {
-      const [base64, texto] = await Promise.all([
-        fileToBase64(file).catch(() => ''),
-        extraerTextoDePDF(file).catch(() => '')
-      ]);
-
-      // 1. Extraer con procesador especializado de anexo de inversiones EELL
-      const res = await procesarAnexoInversionesEELL(
-        texto,
+      // 1. Probar extractor unificado para Excel (.xlsx, .xls), CSV (.csv) o PDF con mapeo oficial de columnas
+      const resUnificado = await extraerActuacionesDeCualquierArchivo(
+        file,
         nombrePlanF2 || 'Plan Provincial',
-        file.name,
-        base64,
-        file
+        ejercicioF2
       );
 
-      let parsed = res.actuaciones || [];
+      let parsed = resUnificado.actuaciones || [];
+      let base64 = '';
+      let texto = '';
 
-      // 2. Si no encontró, intentar análisis espacial de celdas PDF
-      if (parsed.length === 0 && file) {
-        try {
-          const spatial = await extraerActuacionesDePDFConTabla(file);
-          if (spatial && spatial.length > 0) parsed = spatial;
-        } catch (e) {
-          console.warn('Fallback espacial en F2:', e);
-        }
+      // 2. Si no encontró, extraer con procesador especializado de anexo de inversiones EELL
+      if (parsed.length === 0) {
+        [base64, texto] = await Promise.all([
+          fileToBase64(file).catch(() => ''),
+          extraerTextoDePDF(file).catch(() => '')
+        ]);
+
+        const res = await procesarAnexoInversionesEELL(
+          texto,
+          nombrePlanF2 || 'Plan Provincial',
+          file.name,
+          base64,
+          file
+        );
+        parsed = res.actuaciones || [];
       }
 
       // 3. Si sigue vacío, probar extractor de bases de pleno completas

@@ -49,7 +49,9 @@ import {
   ShieldCheck,
   Edit2,
   FolderKanban,
-  GitBranch
+  GitBranch,
+  KeyRound,
+  Laptop
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { RESPUESTAS_TIPO_SUBSANACION, GRUPOS_SUBSANACION } from '../data/initialData';
@@ -60,11 +62,19 @@ import {
   formatearFechaHora,
   generarInformePDF,
   generarInformeSubsanacionPDF,
-  generarInformeFavorablePDF
+  generarInformeFavorablePDF,
+  generarDocumentoResumenActuacionPDF
 } from '../utils/pdfExport';
 import { exportarActuacionCSV } from '../utils/csvExport';
-import { DocumentoActuacion, RondaSubsanacion, InformeFavorableDocumento } from '../types';
+import { DocumentoActuacion, RondaSubsanacion, InformeFavorableDocumento, CertificadoDispositivo, FirmaElectronicaInforme } from '../types';
 import { EditarActuacionModal } from './EditarActuacionModal';
+import { ModalCertificadoDispositivo } from './ModalCertificadoDispositivo';
+import { ModalResumenActuacionPDF } from './ModalResumenActuacionPDF';
+import {
+  obtenerCertificadoDispositivoActual,
+  emitirFirmaElectronicaRevision
+} from '../services/deviceSignatureService';
+import { limpiarNombreEELL } from '../utils/eellUtils';
 
 interface ActuacionDetailProps {
   onVolver: () => void;
@@ -100,7 +110,8 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     usuarios,
     comentarios,
     enviarComentarioActuacion,
-    estadoSincronizacion
+    estadoSincronizacion,
+    planes
   } = useApp();
 
   // Estados de vista principal dentro de la actuación:
@@ -122,10 +133,42 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
   const [copiadoRondaId, setCopiadoRondaId] = useState<string | null>(null);
   const [modalEditarActuacionAbierto, setModalEditarActuacionAbierto] = useState<boolean>(false);
 
-  // Estados para firma electrónica de dictamen favorable
+  // Estados para firma electrónica con certificado instalado en el dispositivo
   const [modalFirmaAbierto, setModalFirmaAbierto] = useState<boolean>(false);
   const [firmandoInforme, setFirmandoInforme] = useState<boolean>(false);
   const [declaracionAceptada, setDeclaracionAceptada] = useState<boolean>(true);
+  const [tipoInformeAFirmar, setTipoInformeAFirmar] = useState<'conforme_favorable' | 'requerimiento_subsanacion'>('conforme_favorable');
+  const [certificadoDispositivo, setCertificadoDispositivo] = useState<CertificadoDispositivo | null>(() => {
+    return usuarioActual ? obtenerCertificadoDispositivoActual(usuarioActual) : null;
+  });
+  const [modalCertificadoDispositivoAbierto, setModalCertificadoDispositivoAbierto] = useState<boolean>(false);
+  // Estado para modal de generación de Documento PDF Resumen Institucional
+  const [modalResumenPDFAbierto, setModalResumenPDFAbierto] = useState<boolean>(false);
+
+  // Sincronizar certificado del dispositivo al cambiar de usuario
+  React.useEffect(() => {
+    if (usuarioActual) {
+      setCertificadoDispositivo(obtenerCertificadoDispositivoActual(usuarioActual));
+    }
+  }, [usuarioActual]);
+
+  // Generación automática del Documento PDF Resumen de la Actuación con formato institucional
+  const handleGenerarPDFResumen = (directo: boolean = false) => {
+    if (!actuacionActiva) return;
+    if (directo) {
+      try {
+        generarDocumentoResumenActuacionPDF(actuacionActiva, usuarioActual);
+        setMensajeExito(
+          `✓ Documento PDF Resumen de la Actuación (${actuacionActiva.numero} - ${actuacionActiva.entidadLocal}) generado y descargado según formato institucional de la Diputación de Cádiz.`
+        );
+      } catch (err) {
+        console.error('Error al generar PDF resumen:', err);
+        setModalResumenPDFAbierto(true);
+      }
+    } else {
+      setModalResumenPDFAbierto(true);
+    }
+  };
 
   // Copiar al portapapeles con compatibilidad amplia
   const copiarTextoAlPortapapeles = async (texto: string, tipo: 'subsanacion' | 'conforme' | string) => {
@@ -160,44 +203,13 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     }
   };
 
-  // Emitir y registrar una nueva ronda de subsanación técnica con su PDF firmado
+  // Emitir y registrar una nueva ronda de subsanación técnica con firma de certificado del dispositivo
   const handleEmitirRondaSubsanacion = () => {
     if (!actuacionActiva || !documentoActivo) return;
     const camposNoConformes = documentoActivo.camposRevisar.filter((c) => c.estado === 'no_conforme');
     if (camposNoConformes.length === 0) return;
-
-    const rondasPrevias = documentoActivo.rondasSubsanacion || [];
-    const numRonda = rondasPrevias.length + 1;
-    const tecNombre =
-      usuarioActual ? `${usuarioActual.nombre} ${usuarioActual.apellidos}` : actuacionActiva.tecnicoAsignadoNombre || 'D. Juan Hinojo García';
-    const tecCargo = usuarioActual?.cargo || 'Jefe del Servicio de Asistencia Técnica y Obras';
-
-    const nuevaRonda: RondaSubsanacion = {
-      id: `ronda-${documentoActivo.id}-${numRonda}-${Date.now()}`,
-      numeroRonda: numRonda,
-      fechaHora: new Date().toISOString(),
-      tecnicoId: usuarioActual?.id || 'usr-tec-1',
-      tecnicoNombre: tecNombre,
-      tecnicoCargo: tecCargo,
-      estado: numRonda === 1 ? 'requiere_subsanacion' : 'parcialmente_subsanado',
-      deficiencias: camposNoConformes.map((c) => ({
-        campoId: c.id,
-        campo: c.campo,
-        descripcion: c.descripcion,
-        subsanaciones: obtenerSubsanacionesDeCampo(c),
-        observacion: c.observacion
-      })),
-      camposConformes: documentoActivo.camposRevisar.filter((c) => c.estado === 'conforme').map((c) => c.campo),
-      csv: `CSV-ADL-SUB-${numRonda}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      firmado: true
-    };
-
-    guardarRondaSubsanacion(documentoActivoIndex, nuevaRonda);
-    generarInformeSubsanacionPDF(actuacionActiva, documentoActivo, nuevaRonda, usuarioActual);
-    setMensajeExito(
-      `Se ha guardado el Requerimiento de Subsanación (Ronda ${numRonda}) con trazabilidad oficial y se ha generado su informe PDF firmado.`
-    );
-    setTimeout(() => setMensajeExito(null), 6000);
+    setTipoInformeAFirmar('requerimiento_subsanacion');
+    setModalFirmaAbierto(true);
   };
 
   // Descargar informe PDF de una ronda de subsanación específica
@@ -206,37 +218,97 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     generarInformeSubsanacionPDF(actuacionActiva, documentoActivo, ronda, usuarioActual);
   };
 
-  // Confirmar firma digital y emitir informe favorable
-  const handleConfirmarFirmaFavorable = () => {
+  // Confirmar firma electrónica y emitir informe oficial con el certificado instalado en el dispositivo
+  const handleConfirmarFirmaFavorable = async () => {
     if (!actuacionActiva || !documentoActivo) return;
     setFirmandoInforme(true);
 
-    setTimeout(() => {
-      const tecNombre =
-        usuarioActual ? `${usuarioActual.nombre} ${usuarioActual.apellidos}` : actuacionActiva.tecnicoAsignadoNombre || 'D. Juan Hinojo García';
-      const tecCargo = usuarioActual?.cargo || 'Jefe del Servicio de Asistencia Técnica y Obras';
-      const tecDpto = usuarioActual?.departamento || 'Área de Desarrollo Local · Diputación Provincial de Cádiz';
-      const csv = `CSV-ADL-CONF-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+    try {
+      const camposNoConformes = documentoActivo.camposRevisar.filter((c) => c.estado === 'no_conforme');
+      const camposConformes = documentoActivo.camposRevisar.filter((c) => c.estado === 'conforme');
 
-      const informe: InformeFavorableDocumento = {
-        emitido: true,
-        fechaHoraFirma: new Date().toISOString(),
-        firmanteId: usuarioActual?.id || 'usr-tec-1',
-        firmanteNombre: tecNombre,
-        firmanteCargo: tecCargo,
-        firmanteDpto: tecDpto,
-        csv,
-        dictamen: 'CALIFICACIÓN FAVORABLE CONFORME BASE 14'
-      };
+      // Ejecutar firma criptográfica con el certificado electrónico del dispositivo
+      const firma = await emitirFirmaElectronicaRevision({
+        actuacionId: actuacionActiva.id,
+        actuacionNumero: actuacionActiva.numero,
+        documentoCodigo: documentoActivo.codigo,
+        tipoInforme: tipoInformeAFirmar,
+        resumenRevision:
+          tipoInformeAFirmar === 'conforme_favorable'
+            ? `Dictamen Técnico Favorable Conforme - ${documentoActivo.titulo}`
+            : `Requerimiento de Subsanación - ${camposNoConformes.length} deficiencia(s) detectadas`,
+        usuario: usuarioActual,
+        certificadoPersonalizado: certificadoDispositivo || undefined
+      });
 
-      firmarInformeFavorable(documentoActivoIndex, informe);
-      generarInformeFavorablePDF(actuacionActiva, documentoActivo, informe, usuarioActual);
+      if (tipoInformeAFirmar === 'conforme_favorable') {
+        const tecCargo = usuarioActual?.cargo || 'Jefe del Servicio de Asistencia Técnica y Obras';
+        const tecDpto = usuarioActual?.departamento || 'Área de Desarrollo Local · Diputación Provincial de Cádiz';
 
+        const informe: InformeFavorableDocumento = {
+          emitido: true,
+          fechaHoraFirma: firma.fechaHoraFirma,
+          firmanteId: usuarioActual?.id || 'usr-tec-1',
+          firmanteNombre: firma.certificado.titular,
+          firmanteCargo: tecCargo,
+          firmanteDpto: tecDpto,
+          csv: firma.csv,
+          dictamen: 'CALIFICACIÓN FAVORABLE CONFORME BASE 14',
+          firmaElectronica: firma
+        };
+
+        firmarInformeFavorable(documentoActivoIndex, informe);
+        generarInformeFavorablePDF(actuacionActiva, documentoActivo, informe, usuarioActual);
+
+        setFirmandoInforme(false);
+        setModalFirmaAbierto(false);
+        setMensajeExito(
+          `✓ Dictamen Favorable firmado con el certificado digital de ${firma.certificado.titular} (${firma.certificado.emisor.split('·')[0].trim()}). CSV oficial: ${firma.csv}. PDF descargado.`
+        );
+        setTimeout(() => setMensajeExito(null), 7000);
+      } else {
+        // Requerimiento de subsanación técnica
+        const rondasPrevias = documentoActivo.rondasSubsanacion || [];
+        const numRonda = rondasPrevias.length + 1;
+        const tecCargo = usuarioActual?.cargo || 'Técnico Revisor';
+
+        const nuevaRonda: RondaSubsanacion = {
+          id: `ronda-${documentoActivo.id}-${numRonda}-${Date.now()}`,
+          numeroRonda: numRonda,
+          fechaHora: firma.fechaHoraFirma,
+          tecnicoId: usuarioActual?.id || 'usr-tec-1',
+          tecnicoNombre: firma.certificado.titular,
+          tecnicoCargo: tecCargo,
+          estado: numRonda === 1 ? 'requiere_subsanacion' : 'parcialmente_subsanado',
+          deficiencias: camposNoConformes.map((c) => ({
+            campoId: c.id,
+            campo: c.campo,
+            descripcion: c.descripcion,
+            subsanaciones: obtenerSubsanacionesDeCampo(c),
+            observacion: c.observacion
+          })),
+          camposConformes: camposConformes.map((c) => c.campo),
+          csv: firma.csv,
+          firmado: true,
+          firmaElectronica: firma
+        };
+
+        guardarRondaSubsanacion(documentoActivoIndex, nuevaRonda);
+        generarInformeSubsanacionPDF(actuacionActiva, documentoActivo, nuevaRonda, usuarioActual);
+
+        setFirmandoInforme(false);
+        setModalFirmaAbierto(false);
+        setMensajeExito(
+          `✓ Requerimiento de Subsanación (Ronda ${numRonda}) firmado con certificado del dispositivo de ${firma.certificado.titular}. CSV: ${firma.csv}. PDF descargado.`
+        );
+        setTimeout(() => setMensajeExito(null), 7000);
+      }
+    } catch (err) {
+      console.error('Error al firmar informe con certificado del dispositivo:', err);
       setFirmandoInforme(false);
-      setModalFirmaAbierto(false);
-      setMensajeExito('Dictamen Técnico Favorable firmado electrónicamente con éxito. PDF oficial descargado.');
-      setTimeout(() => setMensajeExito(null), 6000);
-    }, 600);
+      setMensajeExito('Error al procesar la firma electrónica del dispositivo.');
+      setTimeout(() => setMensajeExito(null), 4000);
+    }
   };
 
   // Descargar PDF de informe favorable ya emitido
@@ -358,45 +430,16 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     const camposConformes = documentoActivo.camposRevisar.filter((c) => c.estado === 'conforme');
     const camposSinRevisar = documentoActivo.camposRevisar.filter((c) => c.estado === 'sin_revisar');
 
-    // CASO A: Hay deficiencias pendientes de subsanación
+    // CASO A: Hay deficiencias pendientes de subsanación -> Firmar electrónicamente el Requerimiento de Subsanación
     if (camposNoConformes.length > 0) {
-      const rondasPrevias = documentoActivo.rondasSubsanacion || [];
-      const numRonda = rondasPrevias.length + 1;
-      const csvRonda = `CSV-ADL-SUB-${numRonda}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-
-      const nuevaRonda: RondaSubsanacion = {
-        id: `ronda-${documentoActivo.id}-${numRonda}-${Date.now()}`,
-        numeroRonda: numRonda,
-        fechaHora: ahora,
-        tecnicoId: usuarioActual?.id || 'usr-tec-1',
-        tecnicoNombre: tecNombre,
-        tecnicoCargo: tecCargo,
-        estado: numRonda === 1 ? 'requiere_subsanacion' : 'parcialmente_subsanado',
-        deficiencias: camposNoConformes.map((c) => ({
-          campoId: c.id,
-          campo: c.campo,
-          descripcion: c.descripcion,
-          subsanaciones: obtenerSubsanacionesDeCampo(c),
-          observacion: c.observacion
-        })),
-        camposConformes: camposConformes.map((c) => c.campo),
-        csv: csvRonda,
-        firmado: true
-      };
-
-      guardarRondaSubsanacion(documentoActivoIndex, nuevaRonda);
-      generarInformeSubsanacionPDF(actuacionActiva, documentoActivo, nuevaRonda, usuarioActual);
-
-      setMensajeExito(
-        `✓ Revisión finalizada: Se ha grabado la Ronda ${numRonda} con ${camposNoConformes.length} subsanación(es) pendientes por el técnico ${tecNombre}. Trazabilidad grabada y PDF oficial generado.`
-      );
-      setTimeout(() => setMensajeExito(null), 7000);
+      setTipoInformeAFirmar('requerimiento_subsanacion');
+      setModalFirmaAbierto(true);
       return;
     }
 
-    // CASO B: Todo comprobado y conforme (0 deficiencias)
+    // CASO B: Todo comprobado y conforme (0 deficiencias) -> Firmar electrónicamente el Dictamen Favorable
     if (camposNoConformes.length === 0 && camposSinRevisar.length === 0 && camposConformes.length > 0) {
-      // Abrir modal de firma electrónica oficial
+      setTipoInformeAFirmar('conforme_favorable');
       setModalFirmaAbierto(true);
       return;
     }
@@ -405,10 +448,11 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     if (camposSinRevisar.length > 0) {
       if (
         window.confirm(
-          `Quedan ${camposSinRevisar.length} comprobaciones pendientes. ¿Deseas calificar los campos restantes como CONFORME y finalizar la revisión con Conforme General?`
+          `Quedan ${camposSinRevisar.length} comprobaciones pendientes. ¿Deseas calificar los campos restantes como CONFORME y proceder a la firma electrónica del Dictamen Favorable con tu certificado del dispositivo?`
         )
       ) {
         autovalidarTodoConformeDocumento();
+        setTipoInformeAFirmar('conforme_favorable');
         setModalFirmaAbierto(true);
       }
     }
@@ -439,6 +483,13 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
     }
   });
   const siguienteNumFac = maxNumFac > 0 ? maxNumFac + 1 : facturasExistentes.length + 1;
+
+  // Listados de certificaciones ordinarias y facturas para colocar los botones justo detrás de la última
+  const certsOrdinariasLista = actuacionActiva?.documentos.filter((d) => d.codigo.startsWith('CERT-') && d.codigo !== 'CERT-FIN') || [];
+  const idUltimaCertOrdinaria = certsOrdinariasLista.length > 0 ? certsOrdinariasLista[certsOrdinariasLista.length - 1].id : null;
+
+  const facturasLista = actuacionActiva?.documentos.filter((d) => d.codigo.startsWith('FAC-')) || [];
+  const idUltimaFactura = facturasLista.length > 0 ? facturasLista[facturasLista.length - 1].id : null;
 
   const handleAgregarCertificacion = (abrirDirectamente = false) => {
     if (!actuacionActiva) return;
@@ -500,6 +551,17 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
   }
 
   const totalDocumentos = actuacionActiva.documentos.length;
+
+  const anualidad = React.useMemo(() => {
+    if (!actuacionActiva) return 2026;
+    if ((actuacionActiva as any).ano) return (actuacionActiva as any).ano;
+    if ((actuacionActiva as any).ejercicio) return (actuacionActiva as any).ejercicio;
+    const pl = planes?.find((p) => p.id === (actuacionActiva as any).planId || p.nombre === actuacionActiva.plan);
+    if (pl?.ejercicio) return pl.ejercicio;
+    const m = actuacionActiva.plan?.match(/\b(202\d)\b/);
+    if (m) return parseInt(m[1], 10);
+    return 2026;
+  }, [actuacionActiva, planes]);
 
   // Clasificación de estados para cada documento del expediente:
   const getEstadoDoc = (doc: DocumentoActuacion): 'ya_revisado' | 'en_revision' | 'pendiente' | 'no_procede' => {
@@ -683,168 +745,254 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
         </div>
       )}
 
-      {/* 1. BARRA SUPERIOR INSTITUCIONAL DE LA ACTUACIÓN (Estética idéntica a Planes) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-5 sm:p-6">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
-            <button
-              onClick={onVolver}
-              className="mt-1 p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition shadow-2xs"
-              title="Volver a la vista del Plan"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
+      {/* 1. CABECERA PRINCIPAL DE LA ACTUACIÓN: DATOS EN FILA, CONTADORES, BARRA DE PROGRESO Y BOTONES */}
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4 sm:p-5 space-y-4">
+        {/* FILA 1: Anualidad | Plan | EELL | Número | Título de la Actuación | Aplicación Presupuestaria | Importe | Técnico Revisor | (a la derecha: Editar actuación) */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onVolver}
+            className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition shadow-sm shrink-0"
+            title="Volver"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
 
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-3 py-1 rounded-full bg-blue-50 text-[#004F90] font-black text-xs border border-blue-200 shadow-2xs">
-                  ACTUACIÓN Nº {actuacionActiva.numero}
-                </span>
-                <span className="text-xs font-semibold text-slate-500">
-                  {actuacionActiva.id}
-                </span>
-                <span className="text-slate-300">|</span>
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5 text-[#004F90]" />
-                  {actuacionActiva.entidadLocal}
-                </span>
-              </div>
-
-              <h1 className="mt-1.5 text-lg sm:text-xl font-black text-slate-900 leading-tight">
-                {actuacionActiva.titulo}
-              </h1>
-
-              <p className="mt-0.5 text-xs text-slate-500 font-medium">
-                {actuacionActiva.plan}
-              </p>
-            </div>
+          <div className="flex-1 overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                  <th className="pb-1.5 px-2.5 font-bold text-center whitespace-nowrap">Anualidad</th>
+                  <th className="pb-1.5 px-2.5 font-bold whitespace-nowrap">Plan</th>
+                  <th className="pb-1.5 px-2.5 font-bold whitespace-nowrap">EELL</th>
+                  <th className="pb-1.5 px-2 font-bold text-center whitespace-nowrap">Número</th>
+                  <th className="pb-1.5 px-2.5 font-bold">Título de la Actuación</th>
+                  <th className="pb-1.5 px-2 font-bold text-center whitespace-nowrap">Aplicación Presupuestaria</th>
+                  <th className="pb-1.5 px-2.5 font-bold text-right whitespace-nowrap">Importe</th>
+                  <th className="pb-1.5 px-2.5 font-bold whitespace-nowrap">Técnico Revisor</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="text-slate-800">
+                  <td className="pt-2 px-2.5 text-center whitespace-nowrap">
+                    <span className="px-2 py-0.5 rounded-md bg-blue-50 text-[#004F90] border border-blue-200 font-mono font-bold text-xs inline-block">
+                      {anualidad}
+                    </span>
+                  </td>
+                  <td className="pt-2 px-2.5 font-semibold text-slate-800 text-xs whitespace-nowrap max-w-[180px] truncate" title={actuacionActiva.plan}>
+                    {actuacionActiva.plan}
+                  </td>
+                  <td className="pt-2 px-2.5 font-bold text-slate-900 text-xs whitespace-nowrap">
+                    {limpiarNombreEELL(actuacionActiva.entidadLocal)}
+                  </td>
+                  <td className="pt-2 px-2 text-center font-mono font-black text-slate-900 text-xs whitespace-nowrap">
+                    {actuacionActiva.numero}
+                  </td>
+                  <td className="pt-2 px-2.5 font-bold text-slate-900 text-xs leading-snug min-w-[220px]">
+                    {actuacionActiva.titulo}
+                  </td>
+                  <td className="pt-2 px-2 text-center font-mono font-semibold text-slate-700 text-xs whitespace-nowrap">
+                    {actuacionActiva.aplicacionPresupuestaria || '2026-03-920-46200'}
+                  </td>
+                  <td className="pt-2 px-2.5 text-right font-mono font-black text-slate-900 text-xs whitespace-nowrap">
+                    {formatearMoneda(actuacionActiva.importes.importeConcesion || actuacionActiva.importes.importeActuacion)}
+                  </td>
+                  <td className="pt-2 px-2.5 text-xs font-semibold text-slate-800 whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1">
+                      <UserCheck className="w-3.5 h-3.5 text-[#004F90]" />
+                      <span>{actuacionActiva.tecnicoAsignadoNombre || 'Carmen Rivas Delgado'}</span>
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          {/* Acciones Rápidas del Expediente: Modo Ficha/Documento, PDF, CSV, Auditoría */}
-          <div className="flex items-center gap-2 self-stretch lg:self-auto justify-end flex-wrap">
-            {/* Conmutador Modo Ficha / Modo Documento */}
-            <div className="bg-white p-1 rounded-2xl border border-[#CBD5E1] shadow-2xs flex items-center gap-1">
-              <button
-                onClick={() => {
-                  setModoVista('ficha');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                  modoVista === 'ficha'
-                    ? 'bg-[#004F90] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-                title="Ver Ficha con el listado cronológico de todos los documentos"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Ficha de Revisión</span>
-              </button>
+          <button
+            type="button"
+            onClick={() => setModalEditarActuacionAbierto(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-blue-50/50 hover:border-[#004F90] text-[#004F90] text-xs font-bold transition shadow-sm shrink-0 whitespace-nowrap"
+            title="Editar actuación"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            <span>Editar actuación</span>
+          </button>
+        </div>
 
-              <button
-                onClick={() => {
-                  setModoVista('documento');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                  modoVista === 'documento'
-                    ? 'bg-[#004F90] text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-                title="Entrar a revisar el documento actual"
-              >
-                <FileCheck2 className="w-3.5 h-3.5" />
-                <span>Revisar Documento</span>
-              </button>
+        {/* FILA 2: TOTAL A REVISAR, YA REVISADOS, EN REVISIÓN, PENDIENTES, NO PROCEDEN */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 border-t border-slate-200">
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 shadow-sm">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block">TOTAL A REVISAR</span>
+            <span className="text-xl font-black text-slate-900 mt-0.5 block">{totalDocumentos}</span>
+            <span className="text-[10px] text-slate-500">Documentos ordenados</span>
+          </div>
+
+          <div className="p-3 rounded-lg bg-emerald-50/80 border border-emerald-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-emerald-800">YA REVISADOS</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
             </div>
+            <span className="text-xl font-black text-emerald-800 mt-0.5 block">{docsYaRevisados}</span>
+            <span className="text-[10px] text-emerald-700 font-semibold">Conformes</span>
+          </div>
 
-            {/* Botón Editar Actuación Oficial */}
-            <button
-              onClick={() => setModalEditarActuacionAbierto(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl border border-slate-300 bg-white hover:bg-blue-50/50 hover:border-[#004F90] text-[#004F90] text-xs font-bold transition shadow-xs"
-              title="Editar datos principales de la actuación (título, importes, plazos, técnico asignado, etc.)"
-            >
-              <Edit2 className="w-3.5 h-3.5 text-[#004F90]" />
-              <span>Editar Actuación</span>
-            </button>
+          <div className="p-3 rounded-lg bg-amber-50/80 border border-amber-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-amber-800">EN REVISIÓN</span>
+              <Clock className="w-4 h-4 text-amber-600" />
+            </div>
+            <span className="text-xl font-black text-amber-900 mt-0.5 block">{docsEnRevision}</span>
+            <span className="text-[10px] text-amber-700">En curso o subsanar</span>
+          </div>
 
-            <button
-              onClick={onVerAuditoria}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl border border-[#DFE6ED] bg-white text-[#1C2E3D] text-xs font-bold hover:bg-slate-50 transition shadow-xs"
-              title="Ver registro de auditoría de accesos"
-            >
-              <History className="w-3.5 h-3.5 text-[#36799C]" />
-              <span className="hidden sm:inline">Auditoría</span>
-            </button>
+          <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-slate-500">PENDIENTES</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-300" />
+            </div>
+            <span className="text-xl font-black text-slate-700 mt-0.5 block">{docsPendientes}</span>
+            <span className="text-[10px] text-slate-400">Por comprobar</span>
+          </div>
 
-            <button
-              onClick={() => exportarActuacionCSV(actuacionActiva)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl border border-[#CFEFE7] bg-[#EAF6F3] text-emerald-800 text-xs font-bold hover:bg-[#D8F0E8] transition shadow-xs"
-              title="Descargar datos de la actuación en CSV"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>CSV</span>
-            </button>
-
-            <button
-              onClick={() => generarInformePDF(actuacionActiva, usuarioActual)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-[#004F90] hover:bg-[#003B71] text-white text-xs font-bold shadow-xs transition"
-              title="Exportar informe oficial de gestión en PDF"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              <span>Informe PDF</span>
-            </button>
+          <div className="p-3 rounded-lg bg-slate-100 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase font-bold text-slate-500">NO PROCEDEN</span>
+              <Ban className="w-3.5 h-3.5 text-slate-400" />
+            </div>
+            <span className="text-xl font-black text-slate-600 mt-0.5 block">{docsNoProceden}</span>
+            <span className="text-[10px] text-slate-400">Exentos para este plan</span>
           </div>
         </div>
 
-        {/* Datos Básicos de la Actuación: Importes y Plazos */}
-        <div className="mt-4 pt-4 border-t border-slate-200/80 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 text-xs">
-          <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold">Importe Concesión</span>
-            <span className="text-sm font-black text-slate-900">
-              {formatearMoneda(actuacionActiva.importes.importeConcesion || actuacionActiva.importes.importeActuacion)}
+        {/* FILA 3: Barra de progreso y % completado */}
+        <div className="space-y-1.5 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-700">
+              Progreso de Revisión Técnica Oficial:
+            </span>
+            <span className="font-mono font-black text-[#004F90]">
+              {porcentajeAvance}% completado ({docsYaRevisados} de {totalAplicables} documentos aplicables)
             </span>
           </div>
+          <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
+            <div
+              className="h-full bg-[#004F90] rounded-full transition-all duration-300"
+              style={{ width: `${porcentajeAvance}%` }}
+            />
+          </div>
+        </div>
 
-          <div className="p-2.5 rounded-xl bg-blue-50/70 border border-blue-200/80 shadow-2xs">
-            <span className="text-[10px] text-blue-800 block uppercase font-bold">Partida Presupuestaria</span>
-            <span className="text-xs font-mono font-black text-blue-900 block truncate" title={actuacionActiva.aplicacionPresupuestaria || '2026-03-920-46200'}>
-              {actuacionActiva.aplicacionPresupuestaria || '2026-03-920-46200'}
-            </span>
+        {/* FILA 4: Botones ficha revisión, revisar documento, CSV, auditoria e informe completo */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-200">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Ficha Revisión */}
+            <button
+              type="button"
+              onClick={() => {
+                setModoVista('ficha');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition shadow-sm ${
+                modoVista === 'ficha'
+                  ? 'bg-[#004F90] text-white shadow-md'
+                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+              title="Ver Ficha con el listado cronológico de todos los documentos"
+            >
+              <Layers className="w-4 h-4" />
+              <span>Ficha Revisión</span>
+            </button>
+
+            {/* Revisar Documento */}
+            <button
+              type="button"
+              onClick={() => {
+                setModoVista('documento');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition shadow-sm ${
+                modoVista === 'documento'
+                  ? 'bg-[#004F90] text-white shadow-md'
+                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+              title="Entrar a revisar el documento actual"
+            >
+              <FileCheck2 className="w-4 h-4" />
+              <span>Revisar Documento</span>
+            </button>
+
+            {/* CSV */}
+            <button
+              type="button"
+              onClick={() => exportarActuacionCSV(actuacionActiva)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition shadow-sm"
+              title="Descargar datos de la actuación en CSV"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>CSV</span>
+            </button>
+
+            {/* Auditoría */}
+            <button
+              type="button"
+              onClick={onVerAuditoria}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-bold hover:bg-slate-50 transition shadow-sm"
+              title="Ver registro de auditoría de accesos"
+            >
+              <History className="w-4 h-4 text-slate-500" />
+              <span>Auditoría</span>
+            </button>
+
+            {/* Informe Completo */}
+            <button
+              type="button"
+              onClick={() => generarInformePDF(actuacionActiva, usuarioActual)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-sm transition"
+              title="Exportar informe técnico completo de liquidación en PDF"
+            >
+              <FileDown className="w-4 h-4 text-[#004F90]" />
+              <span>Informe Completo</span>
+            </button>
+
+            {/* PDF Resumen Oficial */}
+            <button
+              type="button"
+              onClick={() => handleGenerarPDFResumen(false)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-[#004F90] text-xs font-bold transition shadow-sm"
+              title="Generar PDF resumen institucional de la actuación"
+            >
+              <FileText className="w-4 h-4 text-[#004F90]" />
+              <span>PDF Resumen</span>
+            </button>
           </div>
 
-          <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold">Importe Adjudicación</span>
-            <span className="text-sm font-black text-[#004F90]">
-              {formatearMoneda(actuacionActiva.importes.importeAdjudicacion)}
-            </span>
-          </div>
+          {/* Acciones auxiliares */}
+          <div className="flex flex-wrap items-center gap-2">
 
-          <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold">Plazo Ejecución</span>
-            <span className="text-xs font-bold text-slate-800 block">
-              {formatearFecha(actuacionActiva.plazos.plazoEjecucion)}
-            </span>
-            {actuacionActiva.plazos.plazoEjecucionAmpliado && (
-              <span className="text-[10px] text-blue-600 block">Amp: {formatearFecha(actuacionActiva.plazos.plazoEjecucionAmpliado)}</span>
-            )}
-          </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('¿Deseas validar automáticamente como CONFORME todos los documentos pendientes de esta actuación?')) {
+                  autovalidarTodaActuacion();
+                  setMensajeExito('Todos los documentos del expediente han sido validados como CONFORMES.');
+                  setTimeout(() => setMensajeExito(null), 4000);
+                }
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition shadow-sm"
+              title="Calificar automáticamente todo el expediente como conforme"
+            >
+              <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Validar Todo</span>
+            </button>
 
-          <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold">Plazo Justificación</span>
-            <span className="text-xs font-bold text-slate-800 block">
-              {formatearFecha(actuacionActiva.plazos.plazoJustificacion)}
-            </span>
-            {actuacionActiva.plazos.plazoJustificacionAmpliado && (
-              <span className="text-[10px] text-blue-600 block">Amp: {formatearFecha(actuacionActiva.plazos.plazoJustificacionAmpliado)}</span>
-            )}
-          </div>
-
-          <div className="p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs">
-            <span className="text-[10px] text-slate-400 block uppercase font-bold">Técnico Asignado</span>
-            <span className="text-xs font-bold text-slate-800 truncate block">
-              {actuacionActiva.tecnicoAsignadoNombre || 'Carmen Rivas Delgado'}
-            </span>
-            <span className="text-[10px] text-emerald-600 font-semibold block">Revisor Oficial</span>
+            <button
+              type="button"
+              onClick={() => setMostrarCuadroLiquidacion(!mostrarCuadroLiquidacion)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold transition shadow-sm"
+            >
+              <Calculator className="w-3.5 h-3.5 text-amber-600" />
+              <span>{mostrarCuadroLiquidacion ? 'Ocultar Liquidación' : 'Liquidación'}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -854,157 +1002,6 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
       {/* ========================================================================= */}
       {modoVista === 'ficha' && (
         <div className="space-y-5 animate-in fade-in duration-150">
-          {/* PANEL DE CONTROL DE LA FICHA: Contadores y Botones de Automatización */}
-          <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-6 shadow-2xs space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div>
-                <div className="flex items-center gap-2">
-                  <FileCheck2 className="w-5 h-5 text-[#004F90]" />
-                  <h2 className="text-base sm:text-lg font-black text-slate-900">
-                    Ficha de Revisión Técnica del Expediente
-                  </h2>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Listado cronológico de todos los documentos y anexos a comprobar. Cada documento muestra su estado y permite marcar si procede o no.
-                </p>
-              </div>
-
-              {/* Botones de Acción Automatizada y Añadir Certificaciones / Facturas */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Botón + Añadir Certificación con numeración automática */}
-                <button
-                  type="button"
-                  onClick={() => handleAgregarCertificacion(false)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-blue-300 bg-blue-50/90 hover:bg-blue-100 text-[#004F90] text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                  title={`Añadir una nueva certificación (Certificación ${siguienteNumCert})`}
-                >
-                  <Plus className="w-3.5 h-3.5 text-[#004F90] stroke-[3]" />
-                  <span>+ Certificación {siguienteNumCert}</span>
-                </button>
-
-                {/* Botón + Añadir Factura con numeración automática */}
-                <button
-                  type="button"
-                  onClick={() => handleAgregarFactura(false)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-300 bg-indigo-50/90 hover:bg-indigo-100 text-indigo-900 text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                  title={`Añadir una nueva factura de asistencia técnica (Factura ${siguienteNumFac})`}
-                >
-                  <Plus className="w-3.5 h-3.5 text-indigo-700 stroke-[3]" />
-                  <span>+ Factura {siguienteNumFac}</span>
-                </button>
-
-                {/* Botón + Añadir Modificación de Proyecto (Caso especial de incidencias contractuales) */}
-                <button
-                  type="button"
-                  onClick={() => handleAgregarModificadoProyecto(undefined, false)}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-300 bg-amber-50/90 hover:bg-amber-100 text-amber-900 text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                  title="Añadir una modificación de proyecto / contrato (caso especial para alteraciones contractuales durante las obras)"
-                >
-                  <Plus className="w-3.5 h-3.5 text-amber-700 stroke-[3]" />
-                  <span>+ Modificación de Proyecto</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={continuarRevisionAutomatica}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#004F90] hover:bg-[#003B71] text-white text-xs font-black shadow-xs transition active:scale-[0.98]"
-                >
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>
-                    {docsPendientes === totalDocumentos ? 'Comenzar Revisión →' : 'Continuar Revisión →'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm('¿Deseas validar automáticamente como CONFORME todos los documentos pendientes de esta actuación?')) {
-                      autovalidarTodaActuacion();
-                      setMensajeExito('Todos los documentos del expediente han sido validados como CONFORMES.');
-                      setTimeout(() => setMensajeExito(null), 4000);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition shadow-2xs"
-                  title="Calificar automáticamente todo el expediente como conforme"
-                >
-                  <CheckCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Validar Todo Conforme</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMostrarCuadroLiquidacion(!mostrarCuadroLiquidacion)}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-xs font-bold transition shadow-2xs"
-                >
-                  <Calculator className="w-4 h-4 text-amber-600" />
-                  <span>{mostrarCuadroLiquidacion ? 'Ocultar Liquidación' : 'Ver Liquidación'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Fila de Estadísticas y Porcentaje de Avance */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block">Total a Revisar</span>
-                <span className="text-xl font-black text-slate-900 mt-0.5 block">{totalDocumentos}</span>
-                <span className="text-[10px] text-slate-500">Documentos ordenados</span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-emerald-50/80 border border-emerald-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-emerald-800">Ya Revisados</span>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                </div>
-                <span className="text-xl font-black text-emerald-800 mt-0.5 block">{docsYaRevisados}</span>
-                <span className="text-[10px] text-emerald-700 font-semibold">Conformes (Aspas verde)</span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-amber-50/80 border border-amber-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-amber-800">En Revisión</span>
-                  <Clock className="w-4 h-4 text-amber-600" />
-                </div>
-                <span className="text-xl font-black text-amber-900 mt-0.5 block">{docsEnRevision}</span>
-                <span className="text-[10px] text-amber-700">En curso o subsanar</span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">Pendientes</span>
-                  <span className="w-2.5 h-2.5 rounded-full bg-slate-300" />
-                </div>
-                <span className="text-xl font-black text-slate-700 mt-0.5 block">{docsPendientes}</span>
-                <span className="text-[10px] text-slate-400">Por comprobar</span>
-              </div>
-
-              <div className="p-3 rounded-2xl bg-slate-100 border border-slate-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">No Proceden</span>
-                  <Ban className="w-3.5 h-3.5 text-slate-400" />
-                </div>
-                <span className="text-xl font-black text-slate-600 mt-0.5 block">{docsNoProceden}</span>
-                <span className="text-[10px] text-slate-400">Exentos para este plan</span>
-              </div>
-            </div>
-
-            {/* Barra de Progreso */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-700">
-                  Progreso de Revisión Técnica Oficial:
-                </span>
-                <span className="font-mono font-black text-[#004F90]">
-                  {porcentajeAvance}% completado ({docsYaRevisados} de {totalAplicables} documentos aplicables)
-                </span>
-              </div>
-              <div className="w-full h-2.5 rounded-full bg-slate-100 overflow-hidden border border-slate-200">
-                <div
-                  className="h-full bg-[#004F90] rounded-full transition-all duration-300"
-                  style={{ width: `${porcentajeAvance}%` }}
-                />
-              </div>
-            </div>
-          </div>
 
           {/* CUADRO DE LIQUIDACIÓN ECONÓMICA (Desplegable) */}
           {mostrarCuadroLiquidacion && (
@@ -1104,23 +1101,34 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
             </div>
 
             {/* Filas de la Ficha en orden cronológico */}
-            <div className="divide-y divide-slate-100">
-              {actuacionActiva.documentos.map((doc, index) => {
-                const estadoDoc = getEstadoDoc(doc);
-                const estadoMenuDoc = getEstadoMenuDoc(doc);
-                const fase = getFaseCronologica(doc);
-                const prevDoc = index > 0 ? actuacionActiva.documentos[index - 1] : null;
-                const esPrimerDocDeFase = index === 0 || (prevDoc && getFaseCronologica(prevDoc).faseNum !== fase.faseNum);
+            {(() => {
+              const certsOrdinariasLista = actuacionActiva.documentos.filter(
+                (d) => d.codigo.startsWith('CERT-') && d.codigo !== 'CERT-FIN'
+              );
+              const idUltimaCertOrdinaria =
+                certsOrdinariasLista.length > 0 ? certsOrdinariasLista[certsOrdinariasLista.length - 1].id : null;
 
-                // Detección de última certificación ordinaria para mostrar fila + Certificación
-                const esCertOrdinaria = doc.codigo.startsWith('CERT-') && doc.codigo !== 'CERT-FIN';
-                const nextDoc = actuacionActiva.documentos[index + 1];
-                const esUltimaCertOrdinaria =
-                  esCertOrdinaria && (!nextDoc || !nextDoc.codigo.startsWith('CERT-') || nextDoc.codigo === 'CERT-FIN');
+              const facturasLista = actuacionActiva.documentos.filter((d) => d.codigo.startsWith('FAC-'));
+              const idUltimaFactura =
+                facturasLista.length > 0 ? facturasLista[facturasLista.length - 1].id : null;
 
-                // Detección de última factura para mostrar fila + Factura
-                const esFacturaDoc = doc.codigo.startsWith('FAC-');
-                const esUltimaFactura = esFacturaDoc && (!nextDoc || !nextDoc.codigo.startsWith('FAC-'));
+              return (
+                <div className="divide-y divide-slate-100">
+                  {actuacionActiva.documentos.map((doc, index) => {
+                    const estadoDoc = getEstadoDoc(doc);
+                    const estadoMenuDoc = getEstadoMenuDoc(doc);
+                    const fase = getFaseCronologica(doc);
+                    const prevDoc = index > 0 ? actuacionActiva.documentos[index - 1] : null;
+                    const esPrimerDocDeFase = index === 0 || (prevDoc && getFaseCronologica(prevDoc).faseNum !== fase.faseNum);
+
+                    // Detección exacta de última certificación ordinaria (ej: detrás de Certificación 6)
+                    const esUltimaCertOrdinaria = doc.id === idUltimaCertOrdinaria;
+
+                    // Detección exacta de última factura (ej: detrás de Factura 3)
+                    const esUltimaFactura = doc.id === idUltimaFactura;
+
+                    const esCertOrdinaria = doc.codigo.startsWith('CERT-') && doc.codigo !== 'CERT-FIN';
+                    const esFacturaDoc = doc.codigo.startsWith('FAC-');
 
                 // Filtrar según filtro seleccionado
                 if (filtroEstadoFicha === 'pendientes' && (estadoDoc === 'ya_revisado' || estadoDoc === 'no_procede')) return null;
@@ -1326,7 +1334,7 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                             title={`Añadir Certificación ${siguienteNumCert}`}
                           >
                             <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                            <span>+ Certificación {siguienteNumCert}</span>
+                            <span>+ cert {siguienteNumCert}</span>
                           </button>
                           <button
                             type="button"
@@ -1364,7 +1372,7 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                           title={`Añadir Factura ${siguienteNumFac}`}
                         >
                           <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>+ Factura {siguienteNumFac}</span>
+                          <span>+ fact {siguienteNumFac}</span>
                         </button>
                       </div>
                     )}
@@ -1372,6 +1380,8 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                 );
               })}
             </div>
+            );
+          })()}
           </div>
         </div>
       )}
@@ -1398,39 +1408,68 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                 const estadoDoc = getEstadoDoc(doc);
                 const esProyecto = doc.codigo === 'PROY-OBRA' || doc.categoria === 'proyecto';
                 const esModificado = doc.codigo.startsWith('MOD-') || doc.categoria === 'modificado';
+                const esUltimaCert = doc.id === idUltimaCertOrdinaria;
+                const esUltimaFac = doc.id === idUltimaFactura;
 
                 return (
-                  <button
-                    key={doc.id}
-                    type="button"
-                    onClick={() => {
-                      cambiarDocumentoPestana(idx, true);
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 whitespace-nowrap ${
-                      esActivo
-                        ? 'bg-[#004F90] text-white shadow-xs ring-2 ring-blue-300'
-                        : esProyecto
-                        ? 'bg-blue-50 text-[#004F90] border border-blue-200 hover:bg-blue-100 font-black'
-                        : esModificado
-                        ? 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
-                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
-                    }`}
-                    title={`${doc.codigo}: ${doc.titulo}`}
-                  >
-                    {/* Indicador de estado */}
-                    {doc.noProcede ? (
-                      <Ban className={`w-3 h-3 ${esActivo ? 'text-white/80' : 'text-slate-400'}`} />
-                    ) : estadoDoc === 'ya_revisado' ? (
-                      <CheckCircle2 className={`w-3 h-3 ${esActivo ? 'text-emerald-300' : 'text-emerald-600'}`} />
-                    ) : estadoDoc === 'en_revision' ? (
-                      <Clock className={`w-3 h-3 ${esActivo ? 'text-amber-300' : 'text-amber-600'}`} />
-                    ) : (
-                      <span className={`w-2 h-2 rounded-full ${esActivo ? 'bg-white/60' : 'bg-slate-300'}`} />
+                  <React.Fragment key={doc.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        cambiarDocumentoPestana(idx, true);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 whitespace-nowrap ${
+                        esActivo
+                          ? 'bg-[#004F90] text-white shadow-xs ring-2 ring-blue-300'
+                          : esProyecto
+                          ? 'bg-blue-50 text-[#004F90] border border-blue-200 hover:bg-blue-100 font-black'
+                          : esModificado
+                          ? 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
+                          : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                      title={`${doc.codigo}: ${doc.titulo}`}
+                    >
+                      {/* Indicador de estado */}
+                      {doc.noProcede ? (
+                        <Ban className={`w-3 h-3 ${esActivo ? 'text-white/80' : 'text-slate-400'}`} />
+                      ) : estadoDoc === 'ya_revisado' ? (
+                        <CheckCircle2 className={`w-3 h-3 ${esActivo ? 'text-emerald-300' : 'text-emerald-600'}`} />
+                      ) : estadoDoc === 'en_revision' ? (
+                        <Clock className={`w-3 h-3 ${esActivo ? 'text-amber-300' : 'text-amber-600'}`} />
+                      ) : (
+                        <span className={`w-2 h-2 rounded-full ${esActivo ? 'bg-white/60' : 'bg-slate-300'}`} />
+                      )}
+
+                      <span>{esProyecto ? '📁 Pestaña Proyecto' : esModificado ? `⚡ ${doc.codigo}` : doc.codigo}</span>
+                    </button>
+
+                    {/* Botón + cert justo detrás de la última certificación ordinaria (ej. detras de Certificación 6) */}
+                    {esUltimaCert && (
+                      <button
+                        type="button"
+                        onClick={() => handleAgregarCertificacion(true)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-blue-300 bg-blue-50 hover:bg-blue-100 text-[#004F90] text-xs font-black shrink-0 transition shadow-2xs active:scale-[0.98]"
+                        title={`Añadir Certificación ${siguienteNumCert} detrás de ${doc.codigo}`}
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>+ cert {siguienteNumCert}</span>
+                      </button>
                     )}
 
-                    <span>{esProyecto ? '📁 Pestaña Proyecto' : esModificado ? `⚡ ${doc.codigo}` : doc.codigo}</span>
-                  </button>
+                    {/* Botón + fact justo detrás de la última factura (ej. detras de Factura 3) */}
+                    {esUltimaFac && (
+                      <button
+                        type="button"
+                        onClick={() => handleAgregarFactura(true)}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 text-xs font-black shrink-0 transition shadow-2xs active:scale-[0.98]"
+                        title={`Añadir Factura ${siguienteNumFac} detrás de ${doc.codigo}`}
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        <span>+ fact {siguienteNumFac}</span>
+                      </button>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -1463,6 +1502,18 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                 <UserCheck className="w-3.5 h-3.5" />
                 <span>Revisor: {usuarioActual ? `${usuarioActual.nombre} ${usuarioActual.apellidos}` : actuacionActiva.tecnicoAsignadoNombre || 'Carmen Rivas Delgado'}</span>
               </div>
+
+              {/* Firma Electrónica Instalada en el Dispositivo */}
+              <button
+                type="button"
+                onClick={() => setModalCertificadoDispositivoAbierto(true)}
+                className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold shrink-0 transition"
+                title="Ver o cambiar certificado de firma electrónica instalado en el dispositivo"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#004F90]" />
+                <span>Firma Dispositivo: {certificadoDispositivo ? certificadoDispositivo.nif : 'FNMT'}</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              </button>
             </div>
 
             {/* Acciones del documento: Finalizar Revisión + Marcar No Procede + Validar Conforme + Cert/Fact */}
@@ -1477,30 +1528,6 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                 <CheckCircle2 className="w-4 h-4 text-emerald-300" />
                 <span>Finalizar revisión</span>
               </button>
-              {/* Botón + si es Certificación */}
-              {esCertificacion && documentoActivo.codigo !== 'CERT-FIN' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => handleAgregarCertificacion(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-300 bg-blue-50/90 hover:bg-blue-100 text-[#004F90] text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                    title={`Añadir una nueva certificación (Certificación ${siguienteNumCert}) y pasar a revisarla`}
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[3] text-[#004F90]" />
-                    <span>+ Certificación {siguienteNumCert}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAgregarModificadoProyecto(documentoActivo.id, true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50/90 hover:bg-amber-100 text-amber-900 text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                    title="Añadir una modificación de proyecto tras esta certificación y pasar a revisarla"
-                  >
-                    <Plus className="w-3.5 h-3.5 stroke-[3] text-amber-700" />
-                    <span>+ Modificado tras Cert.</span>
-                  </button>
-                </>
-              )}
-
               {/* Botón eliminar si es modificado dinámico */}
               {(documentoActivo.id.startsWith('doc-mod-') || documentoActivo.categoria === 'modificado') && (
                 <button
@@ -1519,43 +1546,6 @@ export const ActuacionDetail: React.FC<ActuacionDetailProps> = ({
                   <Trash2 className="w-3.5 h-3.5 text-red-600" />
                   <span>Eliminar Modificado</span>
                 </button>
-              )}
-
-              {/* Botón + si es Factura */}
-              {esFactura && (
-                <button
-                  type="button"
-                  onClick={() => handleAgregarFactura(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-300 bg-indigo-50/90 hover:bg-indigo-100 text-indigo-900 text-xs font-black transition shadow-2xs active:scale-[0.98]"
-                  title={`Añadir una nueva factura (Factura ${siguienteNumFac}) y pasar a revisarla`}
-                >
-                  <Plus className="w-3.5 h-3.5 stroke-[3] text-indigo-700" />
-                  <span>+ Factura {siguienteNumFac}</span>
-                </button>
-              )}
-
-              {/* Botones de acceso rápido para añadir certificación o factura desde cualquier documento */}
-              {!esCertificacion && !esFactura && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleAgregarCertificacion(false)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100 text-[#004F90] text-xs font-bold transition shadow-2xs"
-                    title={`Añadir Certificación ${siguienteNumCert}`}
-                  >
-                    <Plus className="w-3 h-3 stroke-[2.5]" />
-                    <span>+ Cert. {siguienteNumCert}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAgregarFactura(false)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100 text-indigo-900 text-xs font-bold transition shadow-2xs"
-                    title={`Añadir Factura ${siguienteNumFac}`}
-                  >
-                    <Plus className="w-3 h-3 stroke-[2.5]" />
-                    <span>+ Fact. {siguienteNumFac}</span>
-                  </button>
-                </div>
               )}
 
               {/* Interruptor No Procede */}
@@ -2721,6 +2711,23 @@ Fecha de conformidad: ${fechaConclusion}`;
                         </span>
                       </div>
                     </div>
+                    {documentoActivo.informeFavorable.firmaElectronica && (
+                      <div className="pt-2 border-t border-emerald-200 flex items-center justify-between flex-wrap gap-2 text-[11px] text-emerald-950">
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+                          <span>
+                            Certificado del Dispositivo: <strong className="font-bold">{documentoActivo.informeFavorable.firmaElectronica.certificado.emisor.split('·')[0].trim()}</strong> (Serie: {documentoActivo.informeFavorable.firmaElectronica.certificado.numeroSerie})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setModalCertificadoDispositivoAbierto(true)}
+                          className="text-[#004F90] hover:underline font-bold text-[11px]"
+                        >
+                          Ver certificado del dispositivo
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
 
@@ -2816,21 +2823,31 @@ Fecha de conformidad: ${fechaConclusion}`;
         </div>
       )}
 
-      {/* Modal Oficial de Firma Electrónica para Dictamen Favorable */}
+      {/* Modal Oficial de Firma Electrónica con Certificado del Dispositivo */}
       {modalFirmaAbierto && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-200 shadow-2xl p-6 space-y-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-xl p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-                  <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                  tipoInformeAFirmar === 'conforme_favorable'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {tipoInformeAFirmar === 'conforme_favorable' ? (
+                    <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                  ) : (
+                    <KeyRound className="w-5 h-5 text-amber-700" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900">
-                    Firma Electrónica Oficial · Dictamen Favorable
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {tipoInformeAFirmar === 'conforme_favorable'
+                      ? 'Firma Electrónica · Dictamen Favorable'
+                      : 'Firma Electrónica · Requerimiento de Subsanación'}
                   </h3>
                   <span className="text-xs text-slate-500">
-                    Diputación Provincial de Cádiz · Área de Desarrollo Local
+                    Firma con Certificado Digital instalado en el dispositivo · Diputación de Cádiz
                   </span>
                 </div>
               </div>
@@ -2843,7 +2860,8 @@ Fecha de conformidad: ${fechaConclusion}`;
               </button>
             </div>
 
-            <div className="space-y-2.5 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-200">
+            {/* Datos del Documento y Revisión */}
+            <div className="space-y-2 text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <div className="flex justify-between">
                 <span className="text-slate-500 font-medium">Expediente:</span>
                 <span className="font-bold text-slate-800 text-right">{actuacionActiva.id} · Act. {actuacionActiva.numero}</span>
@@ -2853,26 +2871,64 @@ Fecha de conformidad: ${fechaConclusion}`;
                 <span className="font-bold text-slate-800 text-right">{documentoActivo.codigo} - {documentoActivo.titulo}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Técnico firmante:</span>
-                <span className="font-bold text-slate-800 text-right">
-                  {usuarioActual ? `${usuarioActual.nombre} ${usuarioActual.apellidos}` : actuacionActiva.tecnicoAsignadoNombre || 'Carmen Rivas Delgado'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Cargo oficial:</span>
-                <span className="font-semibold text-slate-700 text-right">
-                  {usuarioActual?.cargo || 'Jefe del Servicio de Asistencia Técnica y Obras'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Departamento:</span>
-                <span className="text-slate-600 text-right">
-                  {usuarioActual?.departamento || 'Área de Desarrollo Local · Diputación Provincial de Cádiz'}
+                <span className="text-slate-500 font-medium">Dictamen tras revisión:</span>
+                <span className={`font-bold text-right ${
+                  tipoInformeAFirmar === 'conforme_favorable' ? 'text-emerald-700' : 'text-amber-700'
+                }`}>
+                  {tipoInformeAFirmar === 'conforme_favorable'
+                    ? '✓ CONFORME (Favorable Base 14)'
+                    : `⚠️ REQUIERE SUBSANACIÓN (${documentoActivo.camposRevisar.filter((c) => c.estado === 'no_conforme').length} deficiencias)`}
                 </span>
               </div>
             </div>
 
-            <label className="flex items-start gap-2.5 text-xs text-slate-700 cursor-pointer p-3 rounded-xl bg-amber-50/50 hover:bg-amber-50 border border-amber-200 transition">
+            {/* Tarjeta de Firma Electrónica del Dispositivo */}
+            <div className="p-3.5 rounded-xl bg-blue-50/50 border border-blue-200 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                  <Laptop className="w-4 h-4 text-[#004F90]" />
+                  <span>Certificado Electrónico del Dispositivo:</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 uppercase flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                  Instalado y Válido
+                </span>
+              </div>
+
+              <div className="space-y-1.5 text-slate-700">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Titular:</span>
+                  <span className="font-bold text-slate-900">{certificadoDispositivo?.titular || `${usuarioActual?.nombre} ${usuarioActual?.apellidos}`.toUpperCase()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">NIF / DNI:</span>
+                  <span className="font-bold text-slate-800">{certificadoDispositivo?.nif || '28765432Z'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Emisor:</span>
+                  <span className="text-slate-600 text-right max-w-[240px] truncate">{certificadoDispositivo?.emisor}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Nº Serie:</span>
+                  <span className="font-mono text-[11px] text-slate-600">{certificadoDispositivo?.numeroSerie}</span>
+                </div>
+              </div>
+
+              <div className="pt-1.5 border-t border-blue-100 flex items-center justify-between">
+                <span className="text-[11px] text-slate-500">
+                  Algoritmo: <strong className="text-slate-700">{certificadoDispositivo?.algoritmo || 'SHA256withRSA'}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setModalCertificadoDispositivoAbierto(true)}
+                  className="text-[11px] font-bold text-[#004F90] hover:underline"
+                >
+                  Cambiar / Ver Certificado
+                </button>
+              </div>
+            </div>
+
+            <label className="flex items-start gap-2.5 text-xs text-slate-700 cursor-pointer p-3 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 transition">
               <input
                 type="checkbox"
                 checked={declaracionAceptada}
@@ -2880,7 +2936,9 @@ Fecha de conformidad: ${fechaConclusion}`;
                 className="mt-0.5 rounded text-[#004F90] focus:ring-[#004F90]"
               />
               <span>
-                Declaro bajo mi responsabilidad que he verificado el cumplimiento de todos los requisitos técnicos exigidos en la Base 14 para este documento y emito dictamen técnico favorable y conforme con plena validez administrativa.
+                {tipoInformeAFirmar === 'conforme_favorable'
+                  ? 'Declaro bajo mi responsabilidad como técnico revisor que he verificado el cumplimiento de las bases reguladoras y emito dictamen técnico favorable y conforme con plena validez jurídica.'
+                  : 'Declaro bajo mi responsabilidad que he revisado las prescripciones técnicas del documento y emito el correspondiente Requerimiento Oficial de Subsanación con las deficiencias detectadas.'}
               </span>
             </label>
 
@@ -2896,17 +2954,25 @@ Fecha de conformidad: ${fechaConclusion}`;
                 type="button"
                 disabled={!declaracionAceptada || firmandoInforme}
                 onClick={handleConfirmarFirmaFavorable}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs shadow-xs transition disabled:opacity-50 active:scale-[0.98]"
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs shadow-xs transition disabled:opacity-50 active:scale-[0.98] text-white ${
+                  tipoInformeAFirmar === 'conforme_favorable'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-[#004F90] hover:bg-[#003867]'
+                }`}
               >
                 {firmandoInforme ? (
                   <>
                     <Clock className="w-4 h-4 animate-spin" />
-                    <span>Firmando electrónicamente...</span>
+                    <span>Firmando con certificado del dispositivo...</span>
                   </>
                 ) : (
                   <>
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>Confirmar Firma y Generar PDF Oficial</span>
+                    <KeyRound className="w-4 h-4" />
+                    <span>
+                      {tipoInformeAFirmar === 'conforme_favorable'
+                        ? 'Firmar con Certificado del Dispositivo y Emitir Conforme'
+                        : 'Firmar con Certificado del Dispositivo y Emitir Requerimiento'}
+                    </span>
                   </>
                 )}
               </button>
@@ -2915,12 +2981,37 @@ Fecha de conformidad: ${fechaConclusion}`;
         </div>
       )}
 
+      {/* Modal de Gestión del Certificado Electrónico del Dispositivo */}
+      {modalCertificadoDispositivoAbierto && (
+        <ModalCertificadoDispositivo
+          mostrar={modalCertificadoDispositivoAbierto}
+          onCerrar={() => setModalCertificadoDispositivoAbierto(false)}
+          onCertificadoCambiado={(nuevoCert) => {
+            setCertificadoDispositivo(nuevoCert);
+          }}
+        />
+      )}
+
       {/* Modal para editar los datos principales de la actuación */}
       {modalEditarActuacionAbierto && actuacionActiva && (
         <EditarActuacionModal
           actuacion={actuacionActiva}
           mostrar={modalEditarActuacionAbierto}
           onCerrar={() => setModalEditarActuacionAbierto(false)}
+        />
+      )}
+
+      {/* Modal Oficial para generar Documento PDF Resumen de la Actuación */}
+      {modalResumenPDFAbierto && actuacionActiva && (
+        <ModalResumenActuacionPDF
+          actuacion={actuacionActiva}
+          usuarioActual={usuarioActual}
+          onCerrar={() => setModalResumenPDFAbierto(false)}
+          onNotificarExito={(msg) => {
+            setMensajeExito(msg);
+            setTimeout(() => setMensajeExito(null), 5000);
+          }}
+          onAbrirGestionCertificado={() => setModalCertificadoDispositivoAbierto(true)}
         />
       )}
     </div>

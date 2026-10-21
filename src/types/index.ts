@@ -3,7 +3,7 @@
  * Área de Desarrollo Local
  */
 
-export type UserRole = 'jefe_servicio' | 'tecnico' | 'auditor';
+export type UserRole = 'jefe_servicio' | 'tecnico' | 'auditor' | 'administrador' | 'administrativo' | 'consulta';
 
 export interface PermisosUsuario {
   puedeEditarPlanes: boolean;
@@ -14,10 +14,38 @@ export interface PermisosUsuario {
   puedeGestionarUsuarios: boolean;
 }
 
+export interface CertificadoDispositivo {
+  id: string;
+  titular: string; // ej: "JUAN HINOJO GARCÍA"
+  nif: string; // ej: "28765432Z"
+  emisor: string; // ej: "AC FNMT Usuarios - Fábrica Nacional de Moneda y Timbre"
+  numeroSerie: string; // ej: "4B:91:CA:88:2E:10:97:F5"
+  validezDesde: string;
+  validezHasta: string;
+  algoritmo: string; // ej: "SHA256withRSA (2048 bits)"
+  huellaSha256: string; // Thumbprint SHA-256
+  origen: 'almacen_sistema' | 'autofirma' | 'archivo_software';
+  activo: boolean;
+  fechaDeteccion?: string;
+}
+
+export interface FirmaElectronicaInforme {
+  certificado: CertificadoDispositivo;
+  fechaHoraFirma: string; // Timestamp ISO
+  selloTiempoTSA: string; // Sello de tiempo de la Autoridad de Sellado
+  hashDocumentoSha256: string; // Hash SHA-256 del informe
+  csv: string; // Código Seguro de Verificación
+  firmado: boolean;
+  valido: boolean;
+  politicaFirma?: string;
+  metodoFirma: 'autofirma_dispositivo' | 'almacen_certificados_dispositivo' | 'archivo_p12';
+}
+
 export interface User {
   id: string;
   nombre: string;
   apellidos: string;
+  nif?: string;
   email: string;
   rol: UserRole;
   departamento: string;
@@ -25,6 +53,7 @@ export interface User {
   telefono?: string;
   biometriaHabilitada: boolean;
   dosFactoresHabilitado: boolean;
+  certificadoDispositivo?: CertificadoDispositivo;
   permisos?: PermisosUsuario;
   activo?: boolean;
   fechaAlta?: string;
@@ -119,6 +148,7 @@ export interface RondaSubsanacion {
   observaciones?: string;
   csv: string;
   firmado: boolean;
+  firmaElectronica?: FirmaElectronicaInforme;
 }
 
 export interface InformeFavorableDocumento {
@@ -130,6 +160,7 @@ export interface InformeFavorableDocumento {
   firmanteDpto: string;
   csv: string;
   dictamen: string;
+  firmaElectronica?: FirmaElectronicaInforme;
 }
 
 export interface DocumentoActuacion {
@@ -177,6 +208,7 @@ export interface ImportesActuacion {
   importeActuacion: number;
   importeConcesion: number;
   importeAdjudicacion: number;
+  aportacionMunicipal?: number;
 }
 
 export interface CuadroLiquidacion {
@@ -196,6 +228,7 @@ export interface Actuacion {
   numero: string; // ej: "01", "02", "14"
   plan: string; // Plan / Programa / Convenio
   entidadLocal: string; // Entidad Local Beneficiaria
+  nifEntidad?: string;
   titulo: string; // Título de la actuación
   aplicacionPresupuestaria?: string; // Aplicación presupuestaria (antes de la subvención solicitada)
   faseActual?: 'solicitud' | 'ejecucion' | 'justificacion';
@@ -206,6 +239,7 @@ export interface Actuacion {
   estadoGeneral: EstadoGeneralActuacion;
   tecnicoAsignadoId: string;
   tecnicoAsignadoNombre: string;
+  tecnicoAsignadoCargo?: string;
   fechaCreacion: string;
   fechaModificacion: string;
   tecnicosParticipantes?: string[];
@@ -224,6 +258,7 @@ export interface FiltrosBusqueda {
   ano?: string;
   aplicacionPresupuestaria?: string;
   importe?: string;
+  tecnico?: string;
 }
 
 export interface NotificacionSistema {
@@ -292,4 +327,15 @@ export interface PlanSubvencion {
   presupuestoTotal: number;
   fechaCreacion: string;
   activo: boolean;
+}
+
+export interface CopiaSeguridadPlan {
+  idCopia: string;
+  fechaBorrado: string;
+  fechaExpiracion: string;
+  diasRetencion: number;
+  borradoPorUsuario: string;
+  plan: PlanSubvencion;
+  actuacionesAsociadas: Actuacion[];
+  motivo?: string;
 }

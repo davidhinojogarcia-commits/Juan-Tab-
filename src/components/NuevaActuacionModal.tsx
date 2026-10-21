@@ -14,11 +14,11 @@ export const NuevaActuacionModal: React.FC<NuevaActuacionModalProps> = ({
   onCerrar,
   onActuacionCreada
 }) => {
-  const { crearNuevaActuacion, actuaciones } = useApp();
+  const { crearNuevaActuacion, actuaciones, planes } = useApp();
 
   const [numero, setNumero] = useState(String(actuaciones.length + 1).padStart(2, '0'));
-  const [municipio, setMunicipio] = useState(MUNICIPIOS_CADIZ[0]);
-  const [plan, setPlan] = useState(PLANES_DISPONIBLES[0]);
+  const [municipio, setMunicipio] = useState(MUNICIPIOS_CADIZ[0] || 'Alcalá de los Gazules');
+  const [plan, setPlan] = useState(planes[0]?.nombre || '');
   const [titulo, setTitulo] = useState('');
   const [aplicacionPresupuestaria, setAplicacionPresupuestaria] = useState('2026-03-920-46200');
   const [importeActuacion, setImporteActuacion] = useState('180000');
@@ -38,7 +38,7 @@ export const NuevaActuacionModal: React.FC<NuevaActuacionModalProps> = ({
 
     const nueva = crearNuevaActuacion({
       numero,
-      entidadLocal: `Ayuntamiento de ${municipio}`,
+      entidadLocal: municipio,
       plan,
       titulo,
       aplicacionPresupuestaria: aplicacionPresupuestaria.trim() || '2026-03-920-46200',
@@ -113,7 +113,7 @@ export const NuevaActuacionModal: React.FC<NuevaActuacionModalProps> = ({
               >
                 {MUNICIPIOS_CADIZ.map((m) => (
                   <option key={m} value={m}>
-                    Ayuntamiento de {m}
+                    {m}
                   </option>
                 ))}
               </select>
@@ -122,19 +122,30 @@ export const NuevaActuacionModal: React.FC<NuevaActuacionModalProps> = ({
 
           <div>
             <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-              Plan / Programa / Convenio Provincial
+              Plan / Programa Provincial *
             </label>
-            <select
-              value={plan}
-              onChange={(e) => setPlan(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
-            >
-              {PLANES_DISPONIBLES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
+            {planes.length > 0 ? (
+              <select
+                value={plan || (planes[0]?.nombre ?? '')}
+                onChange={(e) => setPlan(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold"
+              >
+                {planes.map((p) => (
+                  <option key={p.id} value={p.nombre}>
+                    {p.nombre} ({p.ejercicio})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                required
+                value={plan}
+                onChange={(e) => setPlan(e.target.value)}
+                placeholder="Nombre del Plan (ej. Plan Cádiz 2026)"
+                className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+              />
+            )}
           </div>
 
           <div>

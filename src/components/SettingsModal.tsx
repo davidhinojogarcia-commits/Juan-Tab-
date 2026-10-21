@@ -13,7 +13,9 @@ import {
   Lock,
   RotateCcw,
   CheckCircle2,
-  Smartphone
+  Smartphone,
+  KeyRound,
+  Database
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import {
@@ -21,6 +23,8 @@ import {
   enviarNotificacionPushNativa
 } from '../utils/notifications';
 import { MobileCompatibilityModal } from './MobileCompatibilityModal';
+import { ModalCertificadoDispositivo } from './ModalCertificadoDispositivo';
+import { ModalMigracionFirebase } from './ModalMigracionFirebase';
 
 interface SettingsModalProps {
   mostrar: boolean;
@@ -38,6 +42,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
   const [notifPruebaEnviada, setNotifPruebaEnviada] = useState(false);
   const [confirmarReinicio, setConfirmarReinicio] = useState(false);
   const [mostrarModalMovil, setMostrarModalMovil] = useState(false);
+  const [modalCertificadoAbierto, setModalCertificadoAbierto] = useState(false);
+  const [mostrarModalMigracion, setMostrarModalMigracion] = useState(false);
 
   if (!mostrar) return null;
 
@@ -261,6 +267,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
                   className="w-4 h-4 rounded text-blue-600"
                 />
               </label>
+
+              {/* Firma Electrónica del Dispositivo */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
+                <div>
+                  <span className="font-semibold text-slate-900 dark:text-white block flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-[#004F90]" />
+                    Firma Electrónica del Dispositivo (Certificado FNMT / DNIe)
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Certificado digital instalado en este equipo utilizado para firmar los informes y dictámenes técnicos.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setModalCertificadoAbierto(true)}
+                  className="px-3 py-1.5 rounded-lg bg-[#004F90] hover:bg-[#003867] text-white font-bold text-xs transition shrink-0"
+                >
+                  Ver / Cambiar Certificado
+                </button>
+              </div>
             </div>
           </div>
 
@@ -330,9 +356,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
               <button
                 type="button"
                 onClick={() => forzarSincronizacion()}
-                className="px-3 py-1.5 rounded-xl bg-blue-700 text-white font-bold text-xs"
+                className="px-3 py-1.5 rounded-xl bg-blue-700 text-white font-bold text-xs shrink-0"
               >
                 Sincronizar Ya
+              </button>
+            </div>
+
+            {/* Acceso a Migración y Backup Firebase */}
+            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-200 flex items-center justify-between">
+              <div>
+                <span className="font-semibold text-slate-900 block flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-[#004F90]" />
+                  Copia de Seguridad y Migración a Firebase
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  Descarga tus datos locales en JSON o conéctate a Cloud Firestore para desarrollo compartido.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarModalMigracion(true)}
+                className="px-3 py-1.5 rounded-xl bg-[#004F90] hover:bg-[#003B71] text-white font-bold text-xs shrink-0 shadow-xs"
+              >
+                Gestionar Firebase
               </button>
             </div>
 
@@ -388,6 +434,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ mostrar, onCerrar 
           </button>
         </div>
       </div>
+
+      {modalCertificadoAbierto && (
+        <ModalCertificadoDispositivo
+          mostrar={modalCertificadoAbierto}
+          onCerrar={() => setModalCertificadoAbierto(false)}
+        />
+      )}
     </div>
   );
 };

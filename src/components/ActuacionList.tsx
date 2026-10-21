@@ -24,14 +24,17 @@ import {
   LayoutGrid,
   Edit2,
   FileCheck2,
-  UserCheck
+  UserCheck,
+  AlertTriangle
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Actuacion, EstadoGeneralActuacion } from '../types';
-import { PLANES_DISPONIBLES, MUNICIPIOS_CADIZ } from '../data/initialData';
+import { Actuacion, EstadoGeneralActuacion, PlanSubvencion } from '../types';
+import { PLANES_DISPONIBLES, MUNICIPIOS_CADIZ, construirDocumentosCompletos } from '../data/initialData';
 import { formatearMoneda, formatearFecha, generarInformePDF } from '../utils/pdfExport';
 import { exportarTodasActuacionesCSV } from '../utils/csvExport';
 import { EditarActuacionModal } from './EditarActuacionModal';
+import { obtenerAlertaJustificacion, resolverFechaJustificacionActuacion } from '../utils/plazosAlertas';
+import { limpiarNombreEELL } from '../utils/eellUtils';
 
 // Helper para extraer el año de una actuación de forma fiable
 export const extraerAnoActuacion = (act: Actuacion): string => {
@@ -56,10 +59,7 @@ export const extraerAnoActuacion = (act: Actuacion): string => {
 
 // Helper para limpiar el nombre de la Entidad Local (muestra solo el nombre, sin "Ayuntamiento de ...")
 export const formatearNombreEELL = (nombre: string): string => {
-  if (!nombre) return '';
-  return nombre
-    .replace(/^(ayuntamiento\s+de\s+|ayuntamiento\s+del\s+|ayto\.\s+de\s+|ayto\s+de\s+|ayto\.\s+|ayto\s+|diputación\s+de\s+|diputacion\s+de\s+|e\.l\.a\.\s+de\s+|ela\s+de\s+|e\.l\.m\.\s+de\s+|elm\s+de\s+)/i, '')
-    .trim();
+  return limpiarNombreEELL(nombre);
 };
 
 // Helper para limpiar el número de actuación (muestra solo el número, quitando Nº)
@@ -132,6 +132,7 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
 }) => {
   const {
     actuaciones,
+    planes,
     filtros,
     setFiltros,
     limpiarFiltros,
@@ -141,54 +142,262 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
   const [mostrarFiltrosAvanzados, setMostrarFiltrosAvanzados] = useState(false);
   const [vistaModo, setVistaModo] = useState<'tabla' | 'tarjetas'>('tabla');
   const [actuacionAEditar, setActuacionAEditar] = useState<Actuacion | null>(null);
+  const [filtroSoloProximasJustificacion, setFiltroSoloProximasJustificacion] = useState(false);
 
-  // Filtrado y ordenación cronológica predeterminada
+  // 1. TODAS LAS ACTUACIONES DE TODOS LOS PLANES (Aparecen todas las actuaciones de todos los planes)
+  const todasLasActuaciones = useMemo((): Actuacion[] => {
+    const mapa = new Map<string, Actuacion>();
+    actuaciones.forEach((act) => {
+      mapa.set(act.id, act);
+      if (act.plan && act.numero) {
+        mapa.set(`${act.plan.toLowerCase()}_${act.numero.toLowerCase()}`, act);
+      }
+    });
+
+    const lista: Actuacion[] = [...actuaciones];
+
+    // Asegurar que cada actuación de cada plan esté presente en la relación
+    planes.forEach((pl) => {
+      if (pl.actuacionesPrevistas && pl.actuacionesPrevistas.length > 0) {
+        pl.actuacionesPrevistas.forEach((pr, idx) => {
+          const yaExiste =
+            (pr.actuacionGeneradaId && mapa.has(pr.actuacionGeneradaId)) ||
+            mapa.has(pr.id) ||
+            mapa.has(`${pl.nombre.toLowerCase()}_${pr.numero.toLowerCase()}`) ||
+            lista.some(
+              (a) =>
+                (a.plan.toLowerCase() === pl.nombre.toLowerCase() || a.plan.toLowerCase() === pl.codigo?.toLowerCase()) &&
+                (a.numero === pr.numero || a.id === pr.actuacionGeneradaId)
+            );
+
+          if (!yaExiste) {
+            const rawEell = formatearNombreEELL(pr.entidadLocal || 'Entidad Local');
+            const eellNombre = rawEell;
+            const synth: Actuacion = {
+              id: pr.actuacionGeneradaId || pr.id || `act-plan-${pl.id}-${idx}`,
+              numero: pr.numero || String(idx + 1).padStart(2, '0'),
+              plan: pl.nombre,
+              entidadLocal: eellNombre,
+              titulo: pr.titulo || `Actuación municipal en ${rawEell}`,
+              aplicacionPresupuestaria:
+                pr.aplicacionPresupuestaria || `${pl.ejercicio || 2026}-03-920-${46200 + idx}`,
+              plazos: {
+                plazoEjecucion: pr.plazoEjecucion || pl.plazoEjecucionMaximo,
+                plazoJustificacion: pr.plazoJustificacion || pl.plazoJustificacionMaximo,
+                plazoEjecucionAmpliado: pl.plazoEjecucionAmpliado || pl.plazoEjecucionMaximo,
+                plazoJustificacionAmpliado: pl.plazoJustificacionAmpliado || pl.plazoJustificacionMaximo
+              },
+              importes: {
+                importeActuacion: Math.round((pr.subvencionSolicitada || 150000) * 1.10 * 100) / 100,
+                importeConcesion: pr.subvencionSolicitada || 150000,
+                importeAdjudicacion: pr.subvencionSolicitada || 150000
+              },
+              documentos: construirDocumentosCompletos(),
+              liquidacion: {
+                adjudicacion: pr.subvencionSolicitada || 150000,
+                justificadoEnPlazo: 0,
+                justificadoEnPlazoConDeficiencias: 0,
+                justificadoFueraDePlazo: 0,
+                justificadoFueraDePlazoConDeficiencias: 0,
+                noJustificado: 0,
+                observacionesLiquidacion: `Actuación reconocida en el ${pl.nombre}.`
+              },
+              estadoGeneral: 'pendiente',
+              tecnicoAsignadoId: 'usr-tec-1',
+              tecnicoAsignadoNombre: 'Carmen Rivas Delgado',
+              fechaCreacion: pl.fechaCreacion || new Date().toISOString(),
+              fechaModificacion: pl.fechaCreacion || new Date().toISOString()
+            };
+            lista.push(synth);
+            mapa.set(synth.id, synth);
+          }
+        });
+      } else if (pl.eellBeneficiarias && pl.eellBeneficiarias.length > 0) {
+        pl.eellBeneficiarias.forEach((eell, idx) => {
+          const yaExiste = lista.some(
+            (a) =>
+              (a.plan.toLowerCase() === pl.nombre.toLowerCase() || a.plan.toLowerCase() === pl.codigo?.toLowerCase()) &&
+              a.entidadLocal.toLowerCase().includes(eell.toLowerCase())
+          );
+          if (!yaExiste) {
+            const pto = pl.presupuestoTotal > 0 ? Math.round(pl.presupuestoTotal / pl.eellBeneficiarias.length) : 150000;
+            const synth: Actuacion = {
+              id: `act-gen-${pl.id}-${idx}`,
+              numero: `${idx + 1}.1`,
+              plan: pl.nombre,
+              entidadLocal: formatearNombreEELL(eell),
+              titulo: `Inversión y acondicionamiento municipal en ${formatearNombreEELL(eell)}`,
+              aplicacionPresupuestaria: `${pl.ejercicio || 2026}-03-920-${46200 + idx}`,
+              plazos: {
+                plazoEjecucion: pl.plazoEjecucionMaximo,
+                plazoJustificacion: pl.plazoJustificacionMaximo,
+                plazoEjecucionAmpliado: pl.plazoEjecucionAmpliado || pl.plazoEjecucionMaximo,
+                plazoJustificacionAmpliado: pl.plazoJustificacionAmpliado || pl.plazoJustificacionMaximo
+              },
+              importes: {
+                importeActuacion: Math.round(pto * 1.10 * 100) / 100,
+                importeConcesion: pto,
+                importeAdjudicacion: pto
+              },
+              documentos: construirDocumentosCompletos(),
+              liquidacion: {
+                adjudicacion: pto,
+                justificadoEnPlazo: 0,
+                justificadoEnPlazoConDeficiencias: 0,
+                justificadoFueraDePlazo: 0,
+                justificadoFueraDePlazoConDeficiencias: 0,
+                noJustificado: 0,
+                observacionesLiquidacion: `Actuación municipal del ${pl.nombre}.`
+              },
+              estadoGeneral: 'pendiente',
+              tecnicoAsignadoId: 'usr-tec-1',
+              tecnicoAsignadoNombre: 'Carmen Rivas Delgado',
+              fechaCreacion: pl.fechaCreacion || new Date().toISOString(),
+              fechaModificacion: pl.fechaCreacion || new Date().toISOString()
+            };
+            lista.push(synth);
+          }
+        });
+      }
+    });
+
+    // Garantizar que no existan IDs duplicados en toda la colección
+    const idsVistos = new Set<string>();
+    const listaFinal: Actuacion[] = [];
+    lista.forEach((item, idx) => {
+      let uniqueId = item.id;
+      if (!uniqueId || idsVistos.has(uniqueId)) {
+        uniqueId = `${uniqueId || 'act'}-${item.plan || 'p'}-${idx + 1}`;
+      }
+      idsVistos.add(uniqueId);
+      listaFinal.push({
+        ...item,
+        id: uniqueId
+      });
+    });
+
+    return listaFinal;
+  }, [actuaciones, planes]);
+
+  // Indicador si hay algún filtro activo (por columna o buscador)
+  const hayFiltrosActivos = useMemo(() => {
+    return Boolean(
+      filtros.palabraClave ||
+      filtros.ano ||
+      filtros.plan ||
+      filtros.entidadLocal ||
+      filtros.numeroActuacion ||
+      filtros.titulo ||
+      filtros.aplicacionPresupuestaria ||
+      filtros.importe ||
+      filtros.tecnico ||
+      filtros.estado ||
+      filtroSoloProximasJustificacion
+    );
+  }, [filtros, filtroSoloProximasJustificacion]);
+
+  // Total de actuaciones próximas a su fecha límite de justificación (< 30 días)
+  const proximasJustificacionCount = useMemo(() => {
+    return todasLasActuaciones.filter((a) => {
+      const fecha = resolverFechaJustificacionActuacion(a, planes);
+      const alerta = obtenerAlertaJustificacion(fecha, a.estadoGeneral);
+      return alerta.esProximo30Dias;
+    }).length;
+  }, [todasLasActuaciones, planes]);
+
+  // Filtrado y ordenación:
+  // "ordenadas de planes más antiguas a más nuevos, y numeradas tal como están en los planes"
   const actuacionesFiltradas = useMemo(() => {
-    return actuaciones
+    return todasLasActuaciones
       .filter((act) => {
         const anoAct = extraerAnoActuacion(act);
 
-        // Filtro por palabra clave (busca en título, número, entidad, plan, aplicación, año, importe)
-        if (filtros.palabraClave) {
-          const q = filtros.palabraClave.toLowerCase().trim();
-          const match =
-            act.titulo.toLowerCase().includes(q) ||
-            act.numero.toLowerCase().includes(q) ||
-            act.entidadLocal.toLowerCase().includes(q) ||
-            act.plan.toLowerCase().includes(q) ||
-            (act.aplicacionPresupuestaria && act.aplicacionPresupuestaria.toLowerCase().includes(q)) ||
-            anoAct.includes(q) ||
-            act.importes.importeConcesion.toString().includes(q) ||
-            act.tecnicoAsignadoNombre.toLowerCase().includes(q);
-          if (!match) return false;
+        // Filtro rápido por actuaciones próximas a su fecha límite de justificación (< 30 días)
+        if (filtroSoloProximasJustificacion) {
+          const fecha = resolverFechaJustificacionActuacion(act, planes);
+          const alerta = obtenerAlertaJustificacion(fecha, act.estadoGeneral);
+          if (!alerta.esProximo30Dias) return false;
         }
 
-        // 1. Filtro por AÑO / EJERCICIO
+        // Buscador multi-palabra: permite utilizar todas las palabras que quieras para encontrar una actuación
+        if (filtros.palabraClave) {
+          const tokens = filtros.palabraClave.toLowerCase().trim().split(/\s+/).filter(Boolean);
+          if (tokens.length > 0) {
+            const tecnicos = obtenerTodosTecnicosExpediente(act).join(' ');
+            const textoAct = `
+              ${act.titulo}
+              ${act.numero}
+              ${formatearNumeroActuacion(act.numero)}
+              ${act.entidadLocal}
+              ${formatearNombreEELL(act.entidadLocal)}
+              ${act.plan}
+              ${act.aplicacionPresupuestaria || ''}
+              ${anoAct}
+              ${act.importes.importeConcesion}
+              ${act.importes.importeActuacion}
+              ${act.importes.importeAdjudicacion}
+              ${formatearMoneda(act.importes.importeConcesion)}
+              ${formatearMoneda(act.importes.importeActuacion)}
+              ${act.tecnicoAsignadoNombre}
+              ${tecnicos}
+              ${act.estadoGeneral}
+              ${act.estadoGeneral === 'conforme' || act.estadoGeneral === 'justificado' ? 'conforme justificado' : ''}
+              ${act.estadoGeneral === 'con_deficiencias' ? 'deficiencias subsanacion' : ''}
+              ${act.estadoGeneral === 'en_revision' ? 'revision trámite' : ''}
+              ${act.estadoGeneral === 'pendiente' ? 'pendiente calificar' : ''}
+            `.toLowerCase();
+            const match = tokens.every((t) => textoAct.includes(t));
+            if (!match) return false;
+          }
+        }
+
+        // 1. Filtro en fila: ANUALIDAD
         if (filtros.ano) {
-          const anoQ = filtros.ano.trim();
+          const anoQ = filtros.ano.trim().toLowerCase();
           const matchAno =
-            anoAct.includes(anoQ) ||
-            act.plan.includes(anoQ) ||
-            act.plazos.plazoEjecucion.includes(anoQ);
+            anoAct.toLowerCase().includes(anoQ) ||
+            act.plan.toLowerCase().includes(anoQ) ||
+            (act.plazos?.plazoEjecucion && act.plazos.plazoEjecucion.includes(anoQ));
           if (!matchAno) return false;
         }
 
-        // 2. Filtro por PLAN
-        if (filtros.plan && !act.plan.toLowerCase().includes(filtros.plan.toLowerCase())) {
-          return false;
+        // 2. Filtro en fila: PLAN
+        if (filtros.plan) {
+          const planQ = filtros.plan.trim().toLowerCase();
+          if (!act.plan.toLowerCase().includes(planQ)) {
+            return false;
+          }
         }
 
-        // 3. Filtro por ENTIDAD LOCAL (EELL)
-        if (filtros.entidadLocal && !act.entidadLocal.toLowerCase().includes(filtros.entidadLocal.toLowerCase())) {
-          return false;
+        // 3. Filtro en fila: ENTIDAD LOCAL (EELL)
+        if (filtros.entidadLocal) {
+          const eellQ = filtros.entidadLocal.trim().toLowerCase();
+          const matchEELL =
+            act.entidadLocal.toLowerCase().includes(eellQ) ||
+            formatearNombreEELL(act.entidadLocal).toLowerCase().includes(eellQ);
+          if (!matchEELL) return false;
         }
 
-        // 4. Filtro por NÚMERO DE ACTUACIÓN
-        if (filtros.numeroActuacion && !act.numero.toLowerCase().includes(filtros.numeroActuacion.toLowerCase())) {
-          return false;
+        // 4. Filtro en fila: NÚMERO DE ACTUACIÓN
+        if (filtros.numeroActuacion) {
+          const numQ = filtros.numeroActuacion.trim().toLowerCase();
+          const matchNum =
+            act.numero.toLowerCase().includes(numQ) ||
+            formatearNumeroActuacion(act.numero).toLowerCase().includes(numQ);
+          if (!matchNum) return false;
         }
 
-        // 5. Filtro por APLICACIÓN PRESUPUESTARIA
+        // 5. Filtro en fila: TÍTULO DE LA ACTUACIÓN (Soporta múltiples palabras)
+        if (filtros.titulo) {
+          const titTokens = filtros.titulo.toLowerCase().trim().split(/\s+/).filter(Boolean);
+          if (titTokens.length > 0) {
+            const titLower = act.titulo.toLowerCase();
+            const matchTit = titTokens.every((t) => titLower.includes(t));
+            if (!matchTit) return false;
+          }
+        }
+
+        // 6. Filtro en fila: APLICACIÓN PRESUPUESTARIA
         if (filtros.aplicacionPresupuestaria) {
           const ap = (act.aplicacionPresupuestaria || '').toLowerCase();
           if (!ap.includes(filtros.aplicacionPresupuestaria.toLowerCase().trim())) {
@@ -196,7 +405,7 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
           }
         }
 
-        // 6. Filtro por IMPORTE
+        // 7. Filtro en fila: IMPORTE
         if (filtros.importe) {
           const impQ = filtros.importe.trim().replace(/\./g, '').replace(/,/g, '.');
           const impNum = parseFloat(impQ);
@@ -217,17 +426,28 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
           }
         }
 
-        // 7. Filtro por TÍTULO
-        if (filtros.titulo && !act.titulo.toLowerCase().includes(filtros.titulo.toLowerCase())) {
-          return false;
+        // 8. Filtro en fila: TÉCNICO REVISOR
+        if (filtros.tecnico) {
+          const tecQ = filtros.tecnico.toLowerCase().trim();
+          const tecnicos = obtenerTodosTecnicosExpediente(act);
+          const matchTec =
+            tecnicos.some((t) => t.toLowerCase().includes(tecQ)) ||
+            act.tecnicoAsignadoNombre.toLowerCase().includes(tecQ);
+          if (!matchTec) return false;
         }
 
-        // Filtro por ESTADO
-        if (filtros.estado && act.estadoGeneral !== filtros.estado) {
-          return false;
+        // 9. Filtro en fila: ESTADO
+        if (filtros.estado) {
+          if (filtros.estado === 'conforme') {
+            if (act.estadoGeneral !== 'conforme' && act.estadoGeneral !== 'justificado') {
+              return false;
+            }
+          } else if (act.estadoGeneral !== filtros.estado) {
+            return false;
+          }
         }
 
-        // Filtro por FECHA (compara coincidencia en plazos o creación)
+        // Filtro por FECHA (si se utiliza)
         if (filtros.fecha) {
           const fechaBuscar = filtros.fecha;
           const matchFecha =
@@ -240,22 +460,60 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
         return true;
       })
       .sort((a, b) => {
-        // Ordenación cronológica predeterminada (por fechaModificacion o fechaCreacion)
-        const timeA = new Date(a.fechaModificacion || a.fechaCreacion).getTime();
-        const timeB = new Date(b.fechaModificacion || b.fechaCreacion).getTime();
-        return filtros.ordenCronologico === 'asc' ? timeA - timeB : timeB - timeA;
+        // 1. Obtener la información del plan para cada actuación
+        const planA = planes.find(
+          (p) =>
+            p.nombre.toLowerCase() === a.plan?.toLowerCase() ||
+            p.codigo?.toLowerCase() === a.plan?.toLowerCase() ||
+            (a.plan && p.nombre.toLowerCase().includes(a.plan.toLowerCase()))
+        );
+        const planB = planes.find(
+          (p) =>
+            p.nombre.toLowerCase() === b.plan?.toLowerCase() ||
+            p.codigo?.toLowerCase() === b.plan?.toLowerCase() ||
+            (b.plan && p.nombre.toLowerCase().includes(b.plan.toLowerCase()))
+        );
+
+        // Año / ejercicio del plan (de planes más antiguos a más nuevos -> asc)
+        const anoA = planA ? Number(planA.ejercicio) : parseInt(extraerAnoActuacion(a), 10) || 2026;
+        const anoB = planB ? Number(planB.ejercicio) : parseInt(extraerAnoActuacion(b), 10) || 2026;
+
+        if (anoA !== anoB) {
+          // De planes más antiguos a más nuevos
+          return anoA - anoB;
+        }
+
+        // Si son del mismo año pero planes diferentes, agrupar por nombre de plan
+        const nombrePlanA = planA?.nombre || a.plan || '';
+        const nombrePlanB = planB?.nombre || b.plan || '';
+        if (nombrePlanA !== nombrePlanB) {
+          return nombrePlanA.localeCompare(nombrePlanB);
+        }
+
+        // 2. Dentro del plan: "numeradas tal como están en los planes"
+        // Ordenación natural por número de actuación (1.1, 1.2, 2.1, 2.2, 01, 02...)
+        const numA = String(a.numero || '').trim();
+        const numB = String(b.numero || '').trim();
+        const numDiff = numA.localeCompare(numB, undefined, {
+          numeric: true,
+          sensitivity: 'base'
+        });
+        if (numDiff !== 0) return numDiff;
+
+        // Por municipio / EELL
+        return (a.entidadLocal || '').localeCompare(b.entidadLocal || '');
       });
-  }, [actuaciones, filtros]);
+  }, [todasLasActuaciones, filtros, filtroSoloProximasJustificacion, planes]);
 
-  // Contadores para métricas superiores
+  // Contadores para métricas superiores (calculados sobre todas las actuaciones de todos los planes)
   const stats = useMemo(() => {
-    const total = actuaciones.length;
-    const conformes = actuaciones.filter((a) => a.estadoGeneral === 'conforme' || a.estadoGeneral === 'justificado').length;
-    const conDeficiencias = actuaciones.filter((a) => a.estadoGeneral === 'con_deficiencias').length;
-    const enRevision = actuaciones.filter((a) => a.estadoGeneral === 'en_revision' || a.estadoGeneral === 'pendiente').length;
+    const total = todasLasActuaciones.length;
+    const conformes = todasLasActuaciones.filter((a) => a.estadoGeneral === 'conforme' || a.estadoGeneral === 'justificado').length;
+    const conDeficiencias = todasLasActuaciones.filter((a) => a.estadoGeneral === 'con_deficiencias').length;
+    const enRevision = todasLasActuaciones.filter((a) => a.estadoGeneral === 'en_revision' || a.estadoGeneral === 'pendiente').length;
 
-    const importeTotalActuaciones = actuaciones.reduce((acc, a) => acc + a.importes.importeActuacion, 0);
-    const importeJustificado = actuaciones.reduce((acc, a) => acc + a.liquidacion.justificadoEnPlazo, 0);
+    const importeTotalActuaciones = todasLasActuaciones.reduce((acc, a) => acc + (a.importes?.importeActuacion || 0), 0);
+    const importeJustificado = todasLasActuaciones.reduce((acc, a) => acc + (a.liquidacion?.justificadoEnPlazo || 0), 0);
 
     return {
       total,
@@ -265,7 +523,7 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
       importeTotalActuaciones,
       importeJustificado
     };
-  }, [actuaciones]);
+  }, [todasLasActuaciones]);
 
   const renderBadgeEstado = (estado: EstadoGeneralActuacion) => {
     switch (estado) {
@@ -374,7 +632,7 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
             type="text"
             value={filtros.palabraClave}
             onChange={(e) => setFiltros((prev) => ({ ...prev, palabraClave: e.target.value }))}
-            placeholder="Buscar por actuación, municipio, plan, número o técnico..."
+            placeholder="Buscar con varias palabras (ej: '2024 vejer muralla', título, EELL, plan, nº, técnico)..."
             className="w-full bg-transparent text-xs text-slate-900 placeholder:text-slate-400 focus:outline-hidden"
           />
           {filtros.palabraClave && (
@@ -415,6 +673,23 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
               {ano}
             </button>
           ))}
+
+          {/* Botón Filtro Rápido: Próximas a justificar (<30 días) */}
+          <button
+            type="button"
+            onClick={() => setFiltroSoloProximasJustificacion(!filtroSoloProximasJustificacion)}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition border ${
+              filtroSoloProximasJustificacion
+                ? 'bg-amber-500 text-white border-amber-600 shadow-2xs'
+                : proximasJustificacionCount > 0
+                ? 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100 shadow-2xs'
+                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+            }`}
+            title="Filtrar aquellas actuaciones próximas a su fecha límite de justificación (próximos 30 días)"
+          >
+            <AlertTriangle className={`w-3.5 h-3.5 ${filtroSoloProximasJustificacion ? 'text-white' : 'text-amber-600'}`} />
+            <span>Próx. Justificación ({proximasJustificacionCount})</span>
+          </button>
 
           {/* Botón Filtros Específicos */}
           <button
@@ -470,9 +745,9 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
               className="w-full p-2 rounded-lg border border-slate-200 bg-white text-slate-900 text-xs focus:outline-hidden focus:border-[#004F90]"
             >
               <option value="">Todos los planes</option>
-              {PLANES_DISPONIBLES.map((plan) => (
-                <option key={plan} value={plan}>
-                  {plan}
+              {planes.map((p) => (
+                <option key={p.id} value={p.nombre}>
+                  {p.nombre} ({p.ejercicio})
                 </option>
               ))}
             </select>
@@ -574,66 +849,212 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
         </div>
       )}
 
-      {/* Información de resultados */}
-      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-        <span>
-          Mostrando <strong>{actuacionesFiltradas.length}</strong> de {actuaciones.length} actuaciones
-        </span>
+      {/* Información de resultados y ordenación */}
+      <div className="flex items-center justify-between text-xs text-slate-500 px-1 flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <span className="hidden sm:inline">Orden:</span>
-          <span className="font-semibold text-slate-700">
-            Cronológico ({filtros.ordenCronologico === 'desc' ? 'Descendente' : 'Ascendente'})
+          <span>
+            Mostrando <strong>{actuacionesFiltradas.length}</strong> de <strong>{todasLasActuaciones.length}</strong> actuaciones totales
+          </span>
+          {hayFiltrosActivos && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-[#004F90] border border-blue-200">
+              Filtros activos
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-slate-600">
+          <span className="text-[11px] font-medium">
+            Orden: <strong>Planes más antiguos a más nuevos</strong> · <strong>Numeradas según plan</strong>
           </span>
         </div>
       </div>
 
-      {/* 3. LISTADO DE TODAS LAS ACTUACIONES (EN FILAS, ESTÉTICA IDÉNTICA A PLANES) */}
-      {actuacionesFiltradas.length === 0 ? (
-        <div className="p-12 text-center rounded-2xl bg-white border border-dashed border-slate-200 shadow-2xs">
-          <AlertCircle className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-slate-800">
-            No se han encontrado actuaciones coincidentes
-          </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Prueba a modificar los filtros o los términos de búsqueda.
-          </p>
-          <button
-            onClick={limpiarFiltros}
-            className="mt-4 px-4 py-2 rounded-xl bg-blue-50 text-[#004F90] text-xs font-bold border border-blue-200"
-          >
-            Limpiar filtros
-          </button>
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[10px] uppercase tracking-wider">
-                  <th className="py-3.5 px-3 text-center w-20 whitespace-nowrap">Anualidad</th>
-                  <th className="py-3.5 px-3 min-w-[130px] whitespace-nowrap">Plan</th>
-                  <th className="py-3.5 px-3 min-w-[120px] whitespace-nowrap">EELL</th>
-                  <th className="py-3.5 px-2.5 text-center w-16 whitespace-nowrap">Número</th>
-                  <th className="py-3.5 px-3.5 min-w-[280px]">Título de la Actuación</th>
-                  <th className="py-3.5 px-3 text-center min-w-[140px] whitespace-nowrap">Aplicación Presupuestaria</th>
-                  <th className="py-3.5 px-3 text-right min-w-[105px] whitespace-nowrap">Importe</th>
-                  <th className="py-3.5 px-3 min-w-[150px]">Técnico Revisor</th>
-                  <th className="py-3.5 px-3 text-center min-w-[130px] whitespace-nowrap">Estado</th>
-                  <th className="py-3.5 px-3 text-right min-w-[150px] whitespace-nowrap">Acciones</th>
+      {/* 3. LISTADO DE TODAS LAS ACTUACIONES (CON FILTROS EN LA FILA DE CABECERA) */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              {/* Fila 1: Títulos de columna */}
+              <tr className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200 text-[10px] uppercase tracking-wider">
+                <th className="py-3 px-2 text-center w-24 whitespace-nowrap">Anualidad</th>
+                <th className="py-3 px-2 min-w-[140px] whitespace-nowrap">Plan</th>
+                <th className="py-3 px-2 min-w-[130px] whitespace-nowrap">EELL</th>
+                <th className="py-3 px-1 text-center w-20 whitespace-nowrap">Número</th>
+                <th className="py-3 px-2 min-w-[280px]">Título de la Actuación</th>
+                <th className="py-3 px-2 text-center min-w-[140px] whitespace-nowrap">Aplicación Presupuestaria</th>
+                <th className="py-3 px-2 text-right min-w-[110px] whitespace-nowrap">Importe</th>
+                <th className="py-3 px-2 min-w-[140px] whitespace-nowrap">Técnico Revisor</th>
+                <th className="py-3 px-2 text-center min-w-[130px] whitespace-nowrap">Estado</th>
+                <th className="py-3 px-2 text-center min-w-[120px] whitespace-nowrap">Acciones</th>
+              </tr>
+
+              {/* Fila 2: Filtros directos por columna (ANUALIDAD, PLAN, EELL, NÚMERO, TÍTULO...) */}
+              <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-700">
+                {/* 1. Filtro Anualidad */}
+                <th className="p-1 text-center">
+                  <input
+                    type="text"
+                    value={filtros.ano || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, ano: e.target.value }))}
+                    placeholder="Año..."
+                    className="w-full px-1.5 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 font-mono text-center placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por año (ej. 2024, 2025, 2026...)"
+                  />
+                </th>
+
+                {/* 2. Filtro Plan */}
+                <th className="p-1">
+                  <input
+                    type="text"
+                    value={filtros.plan || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, plan: e.target.value }))}
+                    placeholder="Filtrar plan..."
+                    className="w-full px-2 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por nombre de plan o programa"
+                  />
+                </th>
+
+                {/* 3. Filtro EELL */}
+                <th className="p-1">
+                  <input
+                    type="text"
+                    value={filtros.entidadLocal || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, entidadLocal: e.target.value }))}
+                    placeholder="Filtrar EELL..."
+                    className="w-full px-2 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por municipio o entidad local"
+                  />
+                </th>
+
+                {/* 4. Filtro Número */}
+                <th className="p-1 text-center">
+                  <input
+                    type="text"
+                    value={filtros.numeroActuacion || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, numeroActuacion: e.target.value }))}
+                    placeholder="Nº..."
+                    className="w-full px-1 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 font-mono text-center placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por número de actuación (ej. 1.1, 2.1...)"
+                  />
+                </th>
+
+                {/* 5. Filtro Título */}
+                <th className="p-1">
+                  <input
+                    type="text"
+                    value={filtros.titulo || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, titulo: e.target.value }))}
+                    placeholder="Filtrar título..."
+                    className="w-full px-2 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por palabras del título de la actuación"
+                  />
+                </th>
+
+                {/* 6. Filtro Partida Presupuestaria */}
+                <th className="p-1 text-center">
+                  <input
+                    type="text"
+                    value={filtros.aplicacionPresupuestaria || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, aplicacionPresupuestaria: e.target.value }))}
+                    placeholder="Partida..."
+                    className="w-full px-1 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 font-mono text-center placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por partida presupuestaria"
+                  />
+                </th>
+
+                {/* 7. Filtro Importe */}
+                <th className="p-1 text-right">
+                  <input
+                    type="text"
+                    value={filtros.importe || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, importe: e.target.value }))}
+                    placeholder="Importe..."
+                    className="w-full px-1.5 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 font-mono text-right placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por importe"
+                  />
+                </th>
+
+                {/* 8. Filtro Técnico */}
+                <th className="p-1">
+                  <input
+                    type="text"
+                    value={filtros.tecnico || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, tecnico: e.target.value }))}
+                    placeholder="Técnico..."
+                    className="w-full px-2 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-hidden focus:border-[#004F90] shadow-2xs"
+                    title="Filtrar por técnico revisor o participante"
+                  />
+                </th>
+
+                {/* 9. Filtro Estado */}
+                <th className="p-1 text-center">
+                  <select
+                    value={filtros.estado || ''}
+                    onChange={(e) => setFiltros((prev) => ({ ...prev, estado: e.target.value }))}
+                    className="w-full px-1 py-1 text-[11px] rounded-md border border-slate-300 bg-white text-slate-900 focus:outline-hidden focus:border-[#004F90] shadow-2xs cursor-pointer"
+                    title="Filtrar por estado"
+                  >
+                    <option value="">Todos</option>
+                    <option value="conforme">Conforme</option>
+                    <option value="con_deficiencias">Con deficiencias</option>
+                    <option value="en_revision">En revisión</option>
+                    <option value="pendiente">Pendiente</option>
+                  </select>
+                </th>
+
+                {/* 10. Botón Limpiar filtros */}
+                <th className="p-1 text-center">
+                  <button
+                    type="button"
+                    onClick={limpiarFiltros}
+                    className={`w-full flex items-center justify-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition shadow-2xs ${
+                      hayFiltrosActivos
+                        ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                    }`}
+                    title="Limpiar todos los filtros aplicados"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Limpiar</span>
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {actuacionesFiltradas.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="p-12 text-center">
+                    <AlertCircle className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+                    <h3 className="text-sm font-bold text-slate-800">
+                      No se han encontrado actuaciones coincidentes
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Prueba a modificar los filtros por columna o los términos de búsqueda.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={limpiarFiltros}
+                      className="mt-4 px-4 py-2 rounded-xl bg-blue-50 text-[#004F90] text-xs font-bold border border-blue-200 hover:bg-blue-100 transition shadow-2xs"
+                    >
+                      Restablecer todos los filtros
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {actuacionesFiltradas.map((act) => {
+              ) : (
+                actuacionesFiltradas.map((act, idx) => {
                   const ano = extraerAnoActuacion(act);
                   const nombreEELL = formatearNombreEELL(act.entidadLocal);
                   const numeroLimpio = formatearNumeroActuacion(act.numero);
                   const tecnicosExpediente = obtenerTodosTecnicosExpediente(act);
+                  const fechaJust = resolverFechaJustificacionActuacion(act, planes);
+                  const alerta = obtenerAlertaJustificacion(fechaJust, act.estadoGeneral);
 
                   return (
                     <tr
-                      key={act.id}
+                      key={`${act.id}-${idx}`}
                       onClick={() => onSeleccionarActuacion(act.id)}
-                      className="hover:bg-blue-50/20 transition cursor-pointer group"
+                      className={`hover:bg-blue-50/20 transition cursor-pointer group ${
+                        alerta.esProximo30Dias ? 'bg-amber-50/25' : ''
+                      }`}
                     >
                       {/* 1. ANUALIDAD */}
                       <td className="py-3.5 px-3 text-center font-bold font-mono whitespace-nowrap">
@@ -660,7 +1081,7 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
                         {numeroLimpio}
                       </td>
 
-                      {/* 5. TÍTULO DE LA ACTUACIÓN (Completo, no cortado) */}
+                      {/* 5. TÍTULO DE LA ACTUACIÓN */}
                       <td className="py-3.5 px-3.5">
                         <div className="font-bold text-slate-900 group-hover:text-[#004F90] transition text-xs leading-snug whitespace-normal break-words">
                           {act.titulo}
@@ -728,12 +1149,11 @@ export const ActuacionList: React.FC<ActuacionListProps> = ({
                       </td>
                     </tr>
                   );
-                })}
+                }))}
               </tbody>
             </table>
           </div>
         </div>
-      )}
 
       {/* Modal para editar los datos principales de la actuación */}
       {actuacionAEditar && (

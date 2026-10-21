@@ -11,14 +11,18 @@ import {
   FolderKanban,
   FileBarChart,
   Settings,
-  X
+  X,
+  KeyRound,
+  Archive,
+  BarChart3
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { CadizOfficialLogo } from './CadizOfficialLogo';
+import { ModalCertificadoDispositivo } from './ModalCertificadoDispositivo';
 
 interface HeaderProps {
-  vistaActual: 'actuaciones' | 'planes' | 'dashboard' | 'admin' | 'auditoria';
-  setVistaActual: (vista: 'actuaciones' | 'planes' | 'dashboard' | 'admin' | 'auditoria') => void;
+  vistaActual: 'actuaciones' | 'planes' | 'estado' | 'dashboard' | 'admin' | 'auditoria';
+  setVistaActual: (vista: 'actuaciones' | 'planes' | 'estado' | 'dashboard' | 'admin' | 'auditoria') => void;
   abrirAjustes: () => void;
   abrirAuthModal: () => void;
 }
@@ -36,12 +40,20 @@ export const Header: React.FC<HeaderProps> = ({
     notificaciones,
     marcarNotificacionLeida,
     limpiarTodasNotificaciones,
-    seleccionarActuacion
+    seleccionarActuacion,
+    planesPapelera,
+    abrirModalPapelera
   } = useApp();
+
+  const esAdmin =
+    usuarioActual?.rol === 'administrador' ||
+    usuarioActual?.rol === 'jefe_servicio' ||
+    !!usuarioActual?.permisos?.puedeEditarPlanes;
 
   const [mostrarNotificaciones, setMostrarNotificaciones] = useState(false);
   const [mostrarMenuUsuario, setMostrarMenuUsuario] = useState(false);
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
+  const [modalCertificadoAbierto, setModalCertificadoAbierto] = useState(false);
 
   const notificacionesNoLeidas = notificaciones.filter((n) => !n.leida);
 
@@ -65,6 +77,17 @@ export const Header: React.FC<HeaderProps> = ({
       onClick: () => {
         seleccionarActuacion(null);
         setVistaActual('actuaciones');
+      }
+    },
+    {
+      id: 'estado' as const,
+      label: 'ESTADO',
+      icon: BarChart3,
+      active: vistaActual === 'estado',
+      onClick: () => {
+        seleccionarActuacion(null);
+        setVistaActual('estado');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     },
     {
@@ -159,6 +182,34 @@ export const Header: React.FC<HeaderProps> = ({
             <Sliders className="w-3.5 h-3.5 text-slate-600" />
             <span className="hidden xl:inline">Ajustes</span>
           </button>
+
+          {/* Botón Firma Electrónica del Dispositivo */}
+          <button
+            onClick={() => setModalCertificadoAbierto(true)}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 text-slate-700 hover:text-[#004F90] hover:border-blue-200 hover:bg-blue-50/50 text-xs font-bold transition shadow-2xs"
+            title="Firma electrónica instalada en el dispositivo (FNMT / DNIe)"
+          >
+            <KeyRound className="w-3.5 h-3.5 text-[#004F90]" />
+            <span className="hidden xl:inline">Firma Dispositivo</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          </button>
+
+          {/* Botón Papelera de Reciclaje Global (Custodia 30 días) */}
+          {(esAdmin || planesPapelera.length > 0) && (
+            <button
+              onClick={abrirModalPapelera}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 text-slate-700 hover:text-amber-800 hover:border-amber-300 hover:bg-amber-50/70 text-xs font-bold transition shadow-2xs relative"
+              title="Papelera de reciclaje global · Custodia de planes eliminados durante 30 días con restauración en 1 clic"
+            >
+              <Archive className="w-3.5 h-3.5 text-amber-600" />
+              <span className="hidden lg:inline">Papelera</span>
+              {planesPapelera.length > 0 && (
+                <span className="flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-amber-500 text-[9px] font-black text-white">
+                  {planesPapelera.length}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Botón Notificaciones */}
           <div className="relative">
@@ -301,6 +352,20 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     onClick={() => {
                       setMostrarMenuUsuario(false);
+                      setModalCertificadoAbierto(true);
+                    }}
+                    className="w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 text-left transition"
+                  >
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-[#004F90]" />
+                      <span>Firma Electrónica del Dispositivo</span>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" title="Certificado instalado y válido" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setMostrarMenuUsuario(false);
                       abrirAuthModal();
                     }}
                     className="w-full flex items-center gap-2 p-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 text-left"
@@ -308,6 +373,26 @@ export const Header: React.FC<HeaderProps> = ({
                     <ShieldCheck className="w-4 h-4 text-[#004F90]" />
                     <span>Control de Seguridad / Biometría</span>
                   </button>
+
+                  {(esAdmin || planesPapelera.length > 0) && (
+                    <button
+                      onClick={() => {
+                        setMostrarMenuUsuario(false);
+                        abrirModalPapelera();
+                      }}
+                      className="w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold text-amber-900 bg-amber-50/70 hover:bg-amber-100 border border-amber-200/80 text-left transition"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Archive className="w-4 h-4 text-amber-600" />
+                        <span>Papelera de Planes (Custodia 30d)</span>
+                      </div>
+                      {planesPapelera.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white">
+                          {planesPapelera.length}
+                        </span>
+                      )}
+                    </button>
+                  )}
 
                   <button
                     onClick={() => {
@@ -362,6 +447,16 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
             <button
               onClick={() => {
+                setModalCertificadoAbierto(true);
+                setMenuMovilAbierto(false);
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-[#004F90]" />
+              <span>Firma Dispositivo</span>
+            </button>
+            <button
+              onClick={() => {
                 abrirAuthModal();
                 setMenuMovilAbierto(false);
               }}
@@ -380,8 +475,28 @@ export const Header: React.FC<HeaderProps> = ({
               <Sliders className="w-3.5 h-3.5 text-slate-600" />
               <span>Ajustes</span>
             </button>
+            {(esAdmin || planesPapelera.length > 0) && (
+              <button
+                onClick={() => {
+                  abrirModalPapelera();
+                  setMenuMovilAbierto(false);
+                }}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-bold text-xs"
+              >
+                <Archive className="w-3.5 h-3.5 text-amber-600" />
+                <span>Papelera ({planesPapelera.length})</span>
+              </button>
+            )}
           </div>
         </div>
+      )}
+
+      {/* Modal de Firma Electrónica del Dispositivo */}
+      {modalCertificadoAbierto && (
+        <ModalCertificadoDispositivo
+          mostrar={modalCertificadoAbierto}
+          onCerrar={() => setModalCertificadoAbierto(false)}
+        />
       )}
     </header>
   );

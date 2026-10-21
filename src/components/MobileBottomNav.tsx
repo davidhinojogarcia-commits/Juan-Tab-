@@ -5,12 +5,13 @@ import {
   LayoutDashboard,
   Shield,
   History,
-  Smartphone
+  Smartphone,
+  BarChart3
 } from 'lucide-react';
 
 interface MobileBottomNavProps {
-  vistaActual: 'actuaciones' | 'planes' | 'dashboard' | 'admin' | 'auditoria';
-  setVistaActual: (vista: 'actuaciones' | 'planes' | 'dashboard' | 'admin' | 'auditoria') => void;
+  vistaActual: 'actuaciones' | 'planes' | 'estado' | 'dashboard' | 'admin' | 'auditoria';
+  setVistaActual: (vista: 'actuaciones' | 'planes' | 'estado' | 'dashboard' | 'admin' | 'auditoria') => void;
   onLimpiarActuacionActiva: () => void;
   actuacionActiva: boolean;
   onAbrirCompatibilidadMovil: () => void;
@@ -26,8 +27,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const items = [
     { id: 'planes' as const, label: 'Planes', icon: Layers },
     { id: 'actuaciones' as const, label: 'Actuaciones', icon: FolderKanban },
+    { id: 'estado' as const, label: 'Estado', icon: BarChart3 },
     { id: 'dashboard' as const, label: 'Mando', icon: LayoutDashboard },
-    { id: 'admin' as const, label: 'Admin', icon: Shield },
     { id: 'auditoria' as const, label: 'Auditoría', icon: History },
   ];
 

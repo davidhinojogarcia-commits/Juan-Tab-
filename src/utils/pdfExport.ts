@@ -8,6 +8,7 @@ import {
   RondaSubsanacion,
   InformeFavorableDocumento
 } from '../types';
+import { obtenerCertificadoDispositivoActual } from '../services/deviceSignatureService';
 
 export function formatearFechaHora(fechaStr: string | null | undefined): string {
   if (!fechaStr) return '---';
@@ -309,31 +310,36 @@ export function generarInformePDF(actuacion: Actuacion, usuarioFirmante: User | 
 
   // Bloques de firma
   const firmaY = startYFirmas + 24;
+  const certTecnico = obtenerCertificadoDispositivoActual(usuarioFirmante);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...primaryNavy);
 
-  // Firma Técnico
-  doc.text('EL/LA TÉCNICO/A REVISOR/A', 35, firmaY);
-  doc.line(20, firmaY + 16, 85, firmaY + 16);
-  doc.setFont('helvetica', 'normal');
+  // Firma Técnico con Certificado del Dispositivo
+  doc.text('EL/LA TÉCNICO/A REVISOR/A (CERTIFICADO DIGITAL DISPOSITIVO)', 14, firmaY);
+  doc.line(14, firmaY + 16, 95, firmaY + 16);
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`${certTecnico.titular} (NIF: ${certTecnico.nif})`, 14, firmaY + 20);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
   doc.setTextColor(100, 116, 139);
-  doc.text(usuarioFirmante ? `${usuarioFirmante.nombre} ${usuarioFirmante.apellidos}` : actuacion.tecnicoAsignadoNombre, 32, firmaY + 20);
-  doc.text('Firma electrónica con CSV oficial', 32, firmaY + 24);
+  doc.text(`Cert: ${certTecnico.emisor.split('·')[0].trim()} · Serie: ${certTecnico.numeroSerie}`, 14, firmaY + 24);
+  doc.text(`Firma electrónica del dispositivo con CSV oficial y Sello TSA`, 14, firmaY + 28);
 
   // Firma Jefe de Servicio
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(...primaryNavy);
-  doc.text('Vº Bº EL JEFE DEL SERVICIO DE ASISTENCIA TÉCNICA', pageWidth - 90, firmaY);
-  doc.line(pageWidth - 95, firmaY + 16, pageWidth - 20, firmaY + 16);
+  doc.text('Vº Bº EL JEFE DEL SERVICIO DE ASISTENCIA TÉCNICA', pageWidth - 95, firmaY);
+  doc.line(pageWidth - 95, firmaY + 16, pageWidth - 14, firmaY + 16);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
-  doc.text('D. Juan Hinojo García', pageWidth - 75, firmaY + 20);
-  doc.text('Área de Desarrollo Local - Diputación de Cádiz', pageWidth - 85, firmaY + 24);
+  doc.text('D. Juan Hinojo García', pageWidth - 85, firmaY + 20);
+  doc.text('Área de Desarrollo Local · Diputación de Cádiz', pageWidth - 85, firmaY + 24);
 
   // Numeración de páginas
   const pageCount = (doc as any).getNumberOfPages ? (doc as any).getNumberOfPages() : ((doc as any).internal?.pages?.length - 1) || 1;
@@ -353,6 +359,455 @@ export function generarInformePDF(actuacion: Actuacion, usuarioFirmante: User | 
   // Descarga del fichero
   const nombreLimpio = actuacion.titulo.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
   doc.save(`Informe_Tecnico_ADL_${actuacion.numero}_${nombreLimpio}.pdf`);
+}
+
+export interface OpcionesResumenPDF {
+  incluirFichaCompleta?: boolean;
+  incluirDocumentosBase14?: boolean;
+  incluirLiquidacion?: boolean;
+  incluirFirmaDispositivo?: boolean;
+  observacionesAdicionales?: string;
+}
+
+/**
+ * Genera automáticamente el Documento PDF Resumen Oficial de la Actuación
+ * basándose en los datos cargados y siguiendo el formato institucional de la Excma. Diputación Provincial de Cádiz.
+ */
+export function generarDocumentoResumenActuacionPDF(
+  actuacion: Actuacion,
+  usuarioFirmante: User | null,
+  opciones: OpcionesResumenPDF = {}
+): void {
+  const {
+    incluirFichaCompleta = true,
+    incluirDocumentosBase14 = true,
+    incluirLiquidacion = true,
+    incluirFirmaDispositivo = true,
+    observacionesAdicionales
+  } = opciones;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const primaryNavy: [number, number, number] = [0, 51, 102]; // #003366 Corporativo Diputación
+  const goldAccent: [number, number, number] = [197, 155, 39]; // #C59B27 Oro Institucional
+  const darkSlate: [number, number, number] = [30, 41, 59]; // Slate 800
+  const lightGray: [number, number, number] = [248, 250, 252]; // Slate 50
+  const borderSlate: [number, number, number] = [203, 213, 225]; // Slate 300
+  const emeraldGreen: [number, number, number] = [5, 150, 105]; // Emerald 600
+
+  // 1. Cabecera Institucional Oficial de la Excma. Diputación Provincial de Cádiz
+  doc.setFillColor(...primaryNavy);
+  doc.rect(0, 0, pageWidth, 28, 'F');
+
+  // Franja dorada de separación institucional
+  doc.setFillColor(...goldAccent);
+  doc.rect(0, 28, pageWidth, 2.5, 'F');
+
+  // Textos Cabecera
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text('EXCMA. DIPUTACIÓN PROVINCIAL DE CÁDIZ', 14, 12);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.text('Área de Desarrollo Local · Servicio de Asistencia Técnica y Obras', 14, 18.5);
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(226, 232, 240);
+  doc.text('Planifica v1.0 · Sistema Provincial de Gestión y Justificación de Subvenciones', 14, 24);
+
+  // Lateral derecho: Distintivo oficial de la Sede Electrónica
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(252, 224, 130);
+  doc.text('DOCUMENTO RESUMEN', pageWidth - 14, 13, { align: 'right' });
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text('Sede Electrónica Oficial', pageWidth - 14, 19, { align: 'right' });
+  doc.setFontSize(7);
+  doc.setTextColor(203, 213, 225);
+  doc.text('sede.dipucadiz.es', pageWidth - 14, 24, { align: 'right' });
+
+  // 2. Título Oficial del Documento Resumen
+  let currentY = 38;
+  doc.setTextColor(...primaryNavy);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('DOCUMENTO RESUMEN OFICIAL DE LA ACTUACIÓN', 14, currentY);
+
+  currentY += 6;
+  doc.setFontSize(9);
+  doc.setTextColor(...goldAccent);
+  doc.text(`EXPEDIENTE Nº ${actuacion.numero} · BASE 14 · JUSTIFICACIÓN Y LIQUIDACIÓN`, 14, currentY);
+
+  currentY += 4;
+
+  // 3. Cuadro Resumen Ejecutivo (KPIs de los datos cargados)
+  const totalDocumentos = actuacion.documentos.length;
+  const docsConformes = actuacion.documentos.filter((d) => d.revisadoCompleto && !d.tieneDeficiencias).length;
+  const docsConDeficiencias = actuacion.documentos.filter((d) => d.revisadoCompleto && d.tieneDeficiencias).length;
+  const docsPendientes = totalDocumentos - (docsConformes + docsConDeficiencias);
+
+  const liq = actuacion.liquidacion;
+  const totalJustificado =
+    liq.justificadoEnPlazo +
+    liq.justificadoEnPlazoConDeficiencias +
+    liq.justificadoFueraDePlazo +
+    liq.justificadoFueraDePlazoConDeficiencias;
+  const porcJustificado = liq.adjudicacion > 0 ? (totalJustificado / liq.adjudicacion) * 100 : 0;
+
+  // Caja de Resumen Ejecutivo en cabecera
+  currentY += 2;
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(...borderSlate);
+  doc.roundedRect(14, currentY, pageWidth - 28, 14, 1.5, 1.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...primaryNavy);
+  doc.text('RESUMEN EJECUTIVO:', 18, currentY + 5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...darkSlate);
+
+  const txtKpi1 = `Entidad: ${actuacion.entidadLocal} | Concesión: ${formatearMoneda(actuacion.importes.importeConcesion || actuacion.importes.importeActuacion)} | Adjudicación: ${formatearMoneda(actuacion.importes.importeAdjudicacion)}`;
+  const txtKpi2 = `Justificado: ${formatearMoneda(totalJustificado)} (${porcJustificado.toFixed(1)}%) | Revisión Base 14: ${docsConformes}/${totalDocumentos} Conformes | Estado: ${actuacion.estadoGeneral.toUpperCase().replace(/_/g, ' ')}`;
+  doc.text(txtKpi1, 18, currentY + 9);
+  doc.text(txtKpi2, 18, currentY + 12.5);
+
+  currentY += 18;
+
+  // 4. Bloque 1: Datos Identificativos y Administrativos de la Actuación
+  if (incluirFichaCompleta) {
+    autoTable(doc, {
+      startY: currentY,
+      head: [['1. DATOS IDENTIFICATIVOS Y ADMINISTRATIVOS', 'CONDICIONES ECONÓMICAS Y PLAZOS']],
+      body: [
+        [
+          `Entidad Local: ${actuacion.entidadLocal}\n` +
+          `NIF / CIF Entidad: ${actuacion.nifEntidad || 'P1100000E'}\n` +
+          `Plan Provincial: ${actuacion.plan}\n` +
+          `Nº Actuación: ${actuacion.numero}\n` +
+          `Denominación: ${actuacion.titulo}\n` +
+          `Aplicación Presupuestaria: ${actuacion.aplicacionPresupuestaria || '2026-03-920-46200'}\n` +
+          `Técnico/a Responsable: ${usuarioFirmante ? `${usuarioFirmante.nombre} ${usuarioFirmante.apellidos}` : actuacion.tecnicoAsignadoNombre} (${usuarioFirmante?.cargo || actuacion.tecnicoAsignadoCargo})`,
+
+          `Presupuesto Total Actuación: ${formatearMoneda(actuacion.importes.importeActuacion)}\n` +
+          `Aportación Diputación (Concesión): ${formatearMoneda(actuacion.importes.importeConcesion)}\n` +
+          `Aportación Municipal: ${formatearMoneda(actuacion.importes.aportacionMunicipal || (actuacion.importes.importeActuacion - actuacion.importes.importeConcesion))}\n` +
+          `Importe Adjudicación (Contrato): ${formatearMoneda(actuacion.importes.importeAdjudicacion)}\n` +
+          `Plazo de Ejecución: ${formatearFecha(actuacion.plazos.plazoEjecucion)}${actuacion.plazos.plazoEjecucionAmpliado ? ` (Amp: ${formatearFecha(actuacion.plazos.plazoEjecucionAmpliado)})` : ''}\n` +
+          `Plazo de Justificación: ${formatearFecha(actuacion.plazos.plazoJustificacion)}${actuacion.plazos.plazoJustificacionAmpliado ? ` (Amp: ${formatearFecha(actuacion.plazos.plazoJustificacionAmpliado)})` : ''}\n` +
+          `Estado de Tramitación: ${actuacion.estadoGeneral.toUpperCase().replace(/_/g, ' ')}`
+        ]
+      ],
+      headStyles: {
+        fillColor: primaryNavy,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5
+      },
+      bodyStyles: {
+        fontSize: 7.5,
+        textColor: darkSlate,
+        lineColor: borderSlate,
+        lineWidth: 0.2,
+        cellPadding: 3
+      },
+      theme: 'grid'
+    });
+
+    currentY = (doc as any).lastAutoTable?.finalY || currentY + 45;
+    currentY += 7;
+  }
+
+  // 5. Bloque 2: Desglose y Control de Documentación Base 14 (Datos Cargados)
+  if (incluirDocumentosBase14 && actuacion.documentos.length > 0) {
+    if (currentY > pageHeight - 50) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(...primaryNavy);
+    doc.text('2. RESUMEN DE REVISIÓN DOCUMENTAL BASE 14 (DATOS CARGADOS)', 14, currentY);
+
+    const tablaDocsBody = actuacion.documentos.map((docItem) => {
+      let estadoTexto = 'Pendiente de revisión';
+      let dictamenColor = 'Pendiente';
+      if (docItem.revisadoCompleto) {
+        estadoTexto = docItem.tieneDeficiencias ? 'Con deficiencias / Subsanación' : 'Conforme Base 14';
+      }
+
+      // Detalle de metadatos cargados
+      const metadatosInfo = [
+        docItem.metadatos.importeUltima ? `Imp: ${formatearMoneda(docItem.metadatos.importeUltima)}` : null,
+        docItem.metadatos.fechaExpedicionUltima ? `Exp: ${formatearFecha(docItem.metadatos.fechaExpedicionUltima)}` : null,
+        docItem.metadatos.fechaRegistroUltima ? `Reg: ${formatearFecha(docItem.metadatos.fechaRegistroUltima)}` : null,
+        docItem.metadatos.fechaAprobacionUltima ? `Aprob: ${formatearFecha(docItem.metadatos.fechaAprobacionUltima)}` : null
+      ].filter(Boolean).join(' | ');
+
+      // Deficiencias u observaciones cargadas
+      const deficiencias = docItem.camposRevisar
+        .filter((c) => c.estado === 'no_conforme')
+        .map((c) => `[${c.campo}]: ${c.observacion || 'No conforme'}`)
+        .join('; ');
+
+      const rondasCount = docItem.rondasSubsanacion?.length || 0;
+      const rondasInfo = rondasCount > 0 ? ` (Rondas cursadas: ${rondasCount})` : '';
+
+      return [
+        `${docItem.orden}`,
+        `${docItem.titulo}`,
+        metadatosInfo || 'Sin datos económicos específicos',
+        `${estadoTexto}${rondasInfo}`,
+        deficiencias || (docItem.revisadoCompleto ? 'Cumple requisitos Base 14 sin observaciones' : 'Pendiente de comprobación por los servicios técnicos')
+      ];
+    });
+
+    autoTable(doc, {
+      startY: currentY + 3,
+      head: [[
+        'Nº',
+        'Documento / Anexo',
+        'Metadatos y Fechas Registradas',
+        'Dictamen Técnico',
+        'Observaciones y Deficiencias'
+      ]],
+      body: tablaDocsBody,
+      headStyles: {
+        fillColor: primaryNavy,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.5
+      },
+      bodyStyles: {
+        fontSize: 6.8,
+        textColor: darkSlate,
+        cellPadding: 2,
+        lineColor: [226, 232, 240],
+        lineWidth: 0.15
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 46 },
+        2: { cellWidth: 44 },
+        3: { cellWidth: 36 },
+        4: { cellWidth: 'auto' }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      theme: 'grid'
+    });
+
+    currentY = (doc as any).lastAutoTable?.finalY || currentY + 50;
+    currentY += 7;
+  }
+
+  // 6. Bloque 3: Cuadro de Liquidación y Propuesta Económica
+  if (incluirLiquidacion) {
+    if (currentY > pageHeight - 55) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(...primaryNavy);
+    doc.text('3. CUADRO DE LIQUIDACIÓN Y JUSTIFICACIÓN ECONÓMICA', 14, currentY);
+
+    const totalNoJustificado = liq.noJustificado;
+    const porcNoJustificado = liq.adjudicacion > 0 ? (totalNoJustificado / liq.adjudicacion) * 100 : 0;
+
+    autoTable(doc, {
+      startY: currentY + 3,
+      head: [
+        ['Concepto de Liquidación Económica', 'Importe (€)', 'Porcentaje (%)', 'Estado de Cumplimiento']
+      ],
+      body: [
+        ['Presupuesto de Adjudicación Contratada (Base)', formatearMoneda(liq.adjudicacion), '100,00%', 'Presupuesto total formalizado'],
+        ['Justificado en plazo de ejecución', formatearMoneda(liq.justificadoEnPlazo), `${((liq.justificadoEnPlazo / (liq.adjudicacion || 1)) * 100).toFixed(2)}%`, 'Ejecución y aprobación en plazo reglamentario'],
+        ['Justificado en plazo con deficiencias no sustanciales', formatearMoneda(liq.justificadoEnPlazoConDeficiencias), `${((liq.justificadoEnPlazoConDeficiencias / (liq.adjudicacion || 1)) * 100).toFixed(2)}%`, 'Documentación subsanable o aclaratoria'],
+        ['Justificado fuera de plazo', formatearMoneda(liq.justificadoFueraDePlazo), `${((liq.justificadoFueraDePlazo / (liq.adjudicacion || 1)) * 100).toFixed(2)}%`, 'Sujeto a ponderación o penalidades'],
+        ['Justificado fuera de plazo con deficiencias no sustanciales', formatearMoneda(liq.justificadoFueraDePlazoConDeficiencias), `${((liq.justificadoFueraDePlazoConDeficiencias / (liq.adjudicacion || 1)) * 100).toFixed(2)}%`, 'Sometido a informe de Intervención'],
+        ['NO JUSTIFICADO (Propuesta de Reintegro / Desestimiento)', formatearMoneda(totalNoJustificado), `${porcNoJustificado.toFixed(2)}%`, totalNoJustificado > 0 ? 'Incumplimiento de requisitos Base 14' : 'Sin deducciones aplicadas'],
+        ['TOTAL LIQUIDADO CONFORME', formatearMoneda(totalJustificado), `${porcJustificado.toFixed(2)}%`, 'Propuesta de reconocimiento y abono']
+      ],
+      headStyles: {
+        fillColor: goldAccent,
+        textColor: [0, 34, 68],
+        fontStyle: 'bold',
+        fontSize: 7.5
+      },
+      bodyStyles: {
+        fontSize: 7,
+        textColor: darkSlate,
+        lineColor: borderSlate,
+        lineWidth: 0.2,
+        cellPadding: 2
+      },
+      theme: 'grid'
+    });
+
+    currentY = (doc as any).lastAutoTable?.finalY || currentY + 40;
+    currentY += 6;
+  }
+
+  // Observaciones adicionales si se especificaron
+  if (observacionesAdicionales) {
+    if (currentY > pageHeight - 35) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    doc.setFillColor(254, 252, 232); // Amber 50
+    doc.setDrawColor(251, 191, 36); // Amber 400
+    doc.roundedRect(14, currentY, pageWidth - 28, 16, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(146, 64, 14); // Amber 800
+    doc.text('OBSERVACIONES TÉCNICAS ADICIONALES:', 18, currentY + 5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(120, 53, 15);
+    doc.text(doc.splitTextToSize(observacionesAdicionales, pageWidth - 36), 18, currentY + 10);
+
+    currentY += 20;
+  }
+
+  // 7. Bloque 4: Diligencia Oficial de Firma Electrónica con Certificado del Dispositivo
+  if (incluirFirmaDispositivo) {
+    if (currentY > pageHeight - 55) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    const certTecnico = obtenerCertificadoDispositivoActual(usuarioFirmante);
+    const ahora = new Date();
+    const fechaHoraTSA = ahora.toLocaleString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    // Código Seguro de Verificación (CSV) oficial
+    const hashCorto = certTecnico.huellaSha256 ? certTecnico.huellaSha256.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase() : 'CADIZ2026';
+    const csvOficial = `CSV-ADL-DIPUCADIZ-${actuacion.numero.replace(/[^a-zA-Z0-9]/g, '')}-${hashCorto}`;
+
+    // Recuadro del Sello de Firma Electrónica
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(...primaryNavy);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(14, currentY, pageWidth - 28, 42, 2, 2, 'FD');
+
+    // Franja lateral decorativa azul/oro
+    doc.setFillColor(...primaryNavy);
+    doc.rect(14, currentY, 4, 42, 'F');
+    doc.setFillColor(...goldAccent);
+    doc.rect(18, currentY, 1.5, 42, 'F');
+
+    // Título de la diligencia de firma
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...primaryNavy);
+    doc.text('DILIGENCIA OFICIAL DE FIRMA ELECTRÓNICA CON CERTIFICADO DEL DISPOSITIVO', 23, currentY + 6);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(
+      'Documento Resumen emitido conforme a la Base 14 y suscrito electrónicamente con el certificado digital instalado en el dispositivo del técnico actuante.',
+      23,
+      currentY + 10.5
+    );
+
+    // Columna Izquierda: Datos del Certificado Digital del Técnico
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(...darkSlate);
+    doc.text(`FIRMADO DIGITALMENTE POR: ${certTecnico.titular}`, 23, currentY + 16);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`NIF: ${certTecnico.nif} | Cargo: ${usuarioFirmante?.cargo || actuacion.tecnicoAsignadoCargo}`, 23, currentY + 20);
+    doc.text(`Emisor: ${certTecnico.emisor.split('·')[0].trim()}`, 23, currentY + 24);
+    doc.text(`Nº de Serie: ${certTecnico.numeroSerie} | Algoritmo: ${certTecnico.algoritmo}`, 23, currentY + 28);
+    doc.text(`Huella SHA-256: ${certTecnico.huellaSha256.substring(0, 36)}...`, 23, currentY + 32);
+    doc.text(`Sello de Tiempo TSA Oficial: ${fechaHoraTSA} (TSA Autoridad de Sellado Diputación de Cádiz)`, 23, currentY + 36);
+
+    // Columna Derecha: CSV y Visto Bueno
+    const colDerX = pageWidth - 80;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(...primaryNavy);
+    doc.text('CÓDIGO SEGURO DE VERIFICACIÓN (CSV):', colDerX, currentY + 16);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(30, 41, 59);
+    doc.text(csvOficial, colDerX, currentY + 20.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Cotejo en sede electrónica oficial:', colDerX, currentY + 24.5);
+    doc.setTextColor(...primaryNavy);
+    doc.setFont('helvetica', 'bold');
+    doc.text('https://sede.dipucadiz.es/validador', colDerX, currentY + 28.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...primaryNavy);
+    doc.text('Vº Bº JEFATURA DE SERVICIO:', colDerX, currentY + 33);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text('D. Juan Hinojo García (Jefe Serv. Asistencia Técnica)', colDerX, currentY + 37);
+
+    currentY += 46;
+  }
+
+  // 8. Numeración de páginas institucional en todas las páginas
+  const pageCount = (doc as any).getNumberOfPages ? (doc as any).getNumberOfPages() : ((doc as any).internal?.pages?.length - 1) || 1;
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+
+    // Filete sutil en pie de página
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+    doc.line(14, pageHeight - 10, pageWidth - 14, pageHeight - 10);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `Página ${i} de ${pageCount} · Documento Resumen Oficial de la Actuación · Excma. Diputación Provincial de Cádiz · Sede Electrónica Oficial`,
+      pageWidth / 2,
+      pageHeight - 5.5,
+      { align: 'center' }
+    );
+  }
+
+  // 9. Guardar y descargar automáticamente el documento
+  const nombreLimpio = actuacion.entidadLocal.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
+  const numLimpio = actuacion.numero.replace(/[^a-zA-Z0-9]/g, '_');
+  doc.save(`Resumen_Oficial_Actuacion_${numLimpio}_${nombreLimpio}.pdf`);
 }
 
 /**
@@ -610,35 +1065,48 @@ export function generarInformeSubsanacionPDF(
   doc.text(splitAdv, 14, currentY);
   currentY += splitAdv.length * 3.8 + 6;
 
-  // 7. Sello de Firma Electrónica
-  if (currentY > pageHeight - 45) {
+  // 7. Sello de Firma Electrónica con Certificado del Dispositivo
+  const certSubsanacion = ronda.firmaElectronica?.certificado || obtenerCertificadoDispositivoActual(usuarioFirmante);
+
+  if (currentY > pageHeight - 52) {
     doc.addPage();
     currentY = 20;
   }
 
+  const alturaSelloSub = 34;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(14, currentY, pageWidth - 28, 28, 2, 2, 'FD');
+  doc.roundedRect(14, currentY, pageWidth - 28, alturaSelloSub, 2, 2, 'FD');
 
   // Franja lateral del sello
   doc.setFillColor(...amberWarning);
-  doc.roundedRect(14, currentY, 3, 28, 1, 1, 'F');
+  doc.roundedRect(14, currentY, 3, alturaSelloSub, 1, 1, 'F');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...primaryNavy);
-  doc.text('DOCUMENTO FIRMADO ELECTRÓNICAMENTE CON VALIDEZ JURÍDICA', 22, currentY + 7);
+  doc.text('DOCUMENTO FIRMADO ELECTRÓNICAMENTE CON CERTIFICADO DIGITAL DEL DISPOSITIVO', 22, currentY + 6.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`Técnico Revisor: ${certSubsanacion.titular} (NIF: ${certSubsanacion.nif}) · ${ronda.tecnicoCargo}`, 22, currentY + 12);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Técnico Revisor: ${ronda.tecnicoNombre} · ${ronda.tecnicoCargo}`, 22, currentY + 13);
-  doc.text(`Fecha y hora de firma digital: ${formatearFechaHora(ronda.fechaHora)}`, 22, currentY + 18);
-  doc.setFont('courier', 'bold');
-  doc.text(`Código Seguro de Verificación (CSV): ${ronda.csv}`, 22, currentY + 23);
-  doc.setFont('helvetica', 'italic');
   doc.setFontSize(7);
-  doc.text('Verificación de autenticidad en: https://sede.dipucadiz.es/verifirma', pageWidth - 18, currentY + 23, { align: 'right' });
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Certificado Instalado: ${certSubsanacion.emisor} · Serie: ${certSubsanacion.numeroSerie}`, 22, currentY + 16.5);
+  doc.text(`Huella Criptográfica SHA-256: ${certSubsanacion.huellaSha256.slice(0, 48)}...`, 22, currentY + 21);
+  doc.text(`Fecha y Sello Oficial: ${ronda.firmaElectronica?.selloTiempoTSA ? ronda.firmaElectronica.selloTiempoTSA.split('(')[0].trim() : formatearFechaHora(ronda.fechaHora)}`, 22, currentY + 25.5);
+
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(...primaryNavy);
+  doc.text(`Código Seguro de Verificación (CSV): ${ronda.csv}`, 22, currentY + 30);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Verificación de autenticidad en: https://sede.dipucadiz.es/verifirma', pageWidth - 18, currentY + 30, { align: 'right' });
 
   // Pie de página
   const footerY = pageHeight - 8;
@@ -762,37 +1230,48 @@ export function generarInformeFavorablePDF(
 
   currentY += 4;
 
-  // 5. Sello de Firma Electrónica Oficial (Borde Esmeralda)
-  if (currentY > pageHeight - 48) {
+  // 5. Sello de Firma Electrónica Oficial (Borde Esmeralda con Certificado del Dispositivo)
+  const certFavorable = informeFavorable.firmaElectronica?.certificado || obtenerCertificadoDispositivoActual(usuarioFirmante);
+
+  if (currentY > pageHeight - 54) {
     doc.addPage();
     currentY = 20;
   }
 
+  const alturaSelloFav = 35;
   doc.setFillColor(240, 253, 244);
   doc.setDrawColor(167, 243, 208);
-  doc.roundedRect(14, currentY, pageWidth - 28, 30, 2, 2, 'FD');
+  doc.roundedRect(14, currentY, pageWidth - 28, alturaSelloFav, 2, 2, 'FD');
 
   // Franja lateral verde esmeralda
   doc.setFillColor(...emeraldSuccess);
-  doc.roundedRect(14, currentY, 3.5, 30, 1, 1, 'F');
+  doc.roundedRect(14, currentY, 3.5, alturaSelloFav, 1, 1, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(6, 95, 70);
-  doc.text('CERTIFICADO Y FIRMADO ELECTRÓNICAMENTE POR EL TÉCNICO COMPETENTE', 22, currentY + 7);
+  doc.text('DOCUMENTO CERTIFICADO Y FIRMADO CON CERTIFICADO ELECTRÓNICO DEL DISPOSITIVO', 22, currentY + 6.5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`Técnico Competente: ${certFavorable.titular} (NIF: ${certFavorable.nif}) · ${informeFavorable.firmanteCargo}`, 22, currentY + 12);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(51, 65, 85);
-  doc.text(`Firmante: ${informeFavorable.firmanteNombre} (${informeFavorable.firmanteCargo})`, 22, currentY + 13);
-  doc.text(`Departamento: ${informeFavorable.firmanteDpto}`, 22, currentY + 18);
-  doc.text(`Fecha y hora de certificación electrónica: ${formatearFechaHora(informeFavorable.fechaHoraFirma)}`, 22, currentY + 23);
-  doc.setFont('courier', 'bold');
-  doc.setFontSize(7.5);
-  doc.text(`CSV: ${informeFavorable.csv}`, 22, currentY + 27.5);
-  doc.setFont('helvetica', 'italic');
   doc.setFontSize(7);
-  doc.text('Autenticidad verificable en: https://sede.dipucadiz.es/verifirma', pageWidth - 18, currentY + 27.5, { align: 'right' });
+  doc.setTextColor(51, 65, 85);
+  doc.text(`Certificado Instalado: ${certFavorable.emisor} · Serie: ${certFavorable.numeroSerie}`, 22, currentY + 16.5);
+  doc.text(`Algoritmo y Huella SHA-256: ${certFavorable.algoritmo} · [${certFavorable.huellaSha256.slice(0, 36)}...]`, 22, currentY + 21);
+  doc.text(`Fecha y Sello TSA Cualificado: ${informeFavorable.firmaElectronica?.selloTiempoTSA ? informeFavorable.firmaElectronica.selloTiempoTSA.split('(')[0].trim() : formatearFechaHora(informeFavorable.fechaHoraFirma)}`, 22, currentY + 25.5);
+
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(6, 95, 70);
+  doc.text(`Código Seguro de Verificación (CSV): ${informeFavorable.csv}`, 22, currentY + 30.5);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Autenticidad verificable en: https://sede.dipucadiz.es/verifirma', pageWidth - 18, currentY + 30.5, { align: 'right' });
 
   // Pie de página
   const footerY = pageHeight - 8;

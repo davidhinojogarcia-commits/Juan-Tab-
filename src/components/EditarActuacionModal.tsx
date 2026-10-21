@@ -16,6 +16,7 @@ import { Actuacion } from '../types';
 import { useApp } from '../context/AppContext';
 import { formatearMoneda } from '../utils/pdfExport';
 import { ENTIDADES_LOCALES_CADIZ } from '../utils/pdfPlanParser';
+import { limpiarNombreEELL } from '../utils/eellUtils';
 
 interface EditarActuacionModalProps {
   actuacion: Actuacion;
@@ -143,7 +144,7 @@ export const EditarActuacionModal: React.FC<EditarActuacionModalProps> = ({
                 Modificar Datos de la Actuación
               </h2>
               <p className="text-[11px] text-slate-500 font-medium">
-                Expediente: {actuacion.id} · {actuacion.entidadLocal}
+                Expediente: {actuacion.id} · {limpiarNombreEELL(actuacion.entidadLocal)}
               </p>
             </div>
           </div>
@@ -191,8 +192,8 @@ export const EditarActuacionModal: React.FC<EditarActuacionModalProps> = ({
                 Municipio / Entidad Local
               </label>
               <select
-                value={entidadLocal.replace('Ayuntamiento de ', '')}
-                onChange={(e) => setEntidadLocal(`Ayuntamiento de ${e.target.value}`)}
+                value={limpiarNombreEELL(entidadLocal)}
+                onChange={(e) => setEntidadLocal(limpiarNombreEELL(e.target.value))}
                 className="w-full p-2.5 rounded-xl border border-slate-300 bg-white font-bold text-[#004F90] text-xs"
               >
                 {ENTIDADES_LOCALES_CADIZ.map((mun) => (

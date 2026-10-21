@@ -31,13 +31,20 @@ import {
   Calendar,
   Building2,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Archive,
+  RotateCcw,
+  Download,
+  FileJson,
+  ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { User, UserRole, PermisosUsuario } from '../types';
 import { formatearMoneda, formatearPorcentaje, generarInformeRendimientoPDF } from '../utils/pdfExport';
 import { exportarRendimientoCSV } from '../utils/csvExport';
 import { CadizLogo } from './CadizLogo';
+import { ModalMigracionFirebase } from './ModalMigracionFirebase';
+import { exportarRespaldoOfflineMasivoJSON, ResultadoExportacionMasiva } from '../services/migrationService';
 
 export const AdminPanel: React.FC = () => {
   const {
@@ -51,7 +58,10 @@ export const AdminPanel: React.FC = () => {
     planes,
     comentarios,
     enviarComentarioActuacion,
-    usuarioActual
+    usuarioActual,
+    planesPapelera,
+    abrirModalPapelera,
+    notificaciones
   } = useApp();
 
   const [pestanaAdmin, setPestanaAdmin] = useState<
@@ -61,6 +71,11 @@ export const AdminPanel: React.FC = () => {
   // Modales
   const [mostrarModalNuevoUsuario, setMostrarModalNuevoUsuario] = useState(false);
   const [usuarioEditandoPermisos, setUsuarioEditandoPermisos] = useState<User | null>(null);
+  const [mostrarModalMigracion, setMostrarModalMigracion] = useState(false);
+
+  // Estado para exportación masiva JSON offline
+  const [estadoExportacionMasiva, setEstadoExportacionMasiva] = useState<ResultadoExportacionMasiva | null>(null);
+  const [exportandoMasivo, setExportandoMasivo] = useState(false);
 
   // Formulario Nuevo Usuario
   const [nuevoNombre, setNuevoNombre] = useState('');
@@ -150,6 +165,30 @@ export const AdminPanel: React.FC = () => {
     setUsuarioEditandoPermisos(null);
   };
 
+  const handleExportarRespaldoMasivo = () => {
+    setExportandoMasivo(true);
+    try {
+      const res = exportarRespaldoOfflineMasivoJSON({
+        planes,
+        actuaciones,
+        usuarios,
+        registrosAuditoria,
+        comentarios,
+        notificaciones,
+        planesPapelera,
+        autorNombre: usuarioActual
+          ? `${usuarioActual.nombre} ${usuarioActual.apellidos} (${usuarioActual.cargo || usuarioActual.rol})`
+          : 'D. Juan Hinojo García (Jefe de Servicio)'
+      });
+      setEstadoExportacionMasiva(res);
+      setTimeout(() => setEstadoExportacionMasiva(null), 10000);
+    } catch (err) {
+      console.error('Error al exportar respaldo JSON:', err);
+    } finally {
+      setExportandoMasivo(false);
+    }
+  };
+
   // 1. Detección de Cuellos de Botella del Sistema
   const cuellosDeBotella = React.useMemo(() => {
     const alertas: { tipo: 'retraso' | 'deficiencias' | 'vencimiento'; titulo: string; detalle: string; actuacionId?: string }[] = [];
@@ -224,8 +263,27 @@ export const AdminPanel: React.FC = () => {
           </div>
         </div>
 
-        {/* Botones de Exportación de Rendimiento Global */}
+        {/* Botones de Exportación de Rendimiento Global, Respaldo JSON y Firebase */}
         <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            onClick={handleExportarRespaldoMasivo}
+            disabled={exportandoMasivo}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-emerald-300 bg-emerald-50/90 hover:bg-emerald-100 text-emerald-900 text-xs font-black shadow-xs transition active:scale-[0.98]"
+            title="Exportación masiva de respaldo offline seguro en formato JSON (Planes y Actuaciones)"
+          >
+            <Download className="w-4 h-4 text-emerald-700" />
+            <span>{exportandoMasivo ? 'Generando...' : 'Respaldo JSON Masivo'}</span>
+          </button>
+
+          <button
+            onClick={() => setMostrarModalMigracion(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-[#004F90] text-xs font-black shadow-xs transition"
+            title="Gestión de Infraestructura Firebase, Backup y Migración de Datos"
+          >
+            <Database className="w-4 h-4 text-[#004F90]" />
+            <span>Firebase & Backup</span>
+          </button>
+
           <button
             onClick={() => exportarRendimientoCSV(actuaciones)}
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl border border-[#DFE6ED] bg-white hover:bg-slate-50 text-[#1C2E3D] text-xs font-bold shadow-xs transition"
@@ -340,6 +398,161 @@ export const AdminPanel: React.FC = () => {
             </div>
           )}
 
+          {/* Tarjeta Institucional: Exportación Masiva y Respaldo Offline Seguro Pre-Migración */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-white border border-emerald-200/80 shadow-xs space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-center shrink-0 shadow-2xs">
+                  <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+                      Respaldo Offline Seguro · Exportación Masiva Pre-Migración
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      Copia Completa en Disco
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                      JSON Estructurado
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 max-w-3xl leading-relaxed">
+                    Garantía institucional previa a la sincronización en Firebase Cloud Firestore: descarga una copia completa e inalterable de todos los planes provinciales, actuaciones con sus 5 datos administrativos, importes económicos, expedientes de licitación, modificados cronológicos, certificaciones y documentos Base 14 para custodia offline segura en tu equipo local.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-start md:self-center">
+                <button
+                  type="button"
+                  onClick={handleExportarRespaldoMasivo}
+                  disabled={exportandoMasivo}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-[0.98] text-white text-xs font-black shadow-2xs transition"
+                  title="Descargar copia de seguridad masiva completa de todos los planes y actuaciones actuales"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{exportandoMasivo ? 'Generando archivo JSON...' : 'Descargar Respaldo JSON Completo'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Desglose de Registros e Importes Respaldados */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                  Planes Actuales
+                </span>
+                <div className="text-lg font-black text-slate-900 font-mono">
+                  {planes.length} convocatorias
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono mt-0.5 block truncate">
+                  Presupuesto: {formatearMoneda(planes.reduce((acc, p) => acc + (Number(p.presupuestoTotal) || 0), 0))}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                  Actuaciones y Obras
+                </span>
+                <div className="text-lg font-black text-[#004F90] font-mono">
+                  {actuaciones.length} expedientes
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono mt-0.5 block truncate">
+                  Subvención: {formatearMoneda(actuaciones.reduce((acc, a) => acc + (Number(a.importes?.importeConcesion || a.importes?.importeActuacion) || 0), 0))}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                  Documentación Base 14
+                </span>
+                <div className="text-lg font-black text-emerald-800 font-mono">
+                  {actuaciones.reduce((acc, a) => acc + (a.documentos?.length || 0), 0)} documentos
+                </div>
+                <span className="text-[10px] text-slate-500 mt-0.5 block truncate">
+                  Checklists y calificaciones
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[10px] font-bold text-slate-400 uppercase block mb-0.5">
+                  Trazabilidad & Modificados
+                </span>
+                <div className="text-lg font-black text-slate-900 font-mono">
+                  {actuaciones.reduce((acc, a) => acc + (a.documentos?.filter((d) => d.categoria === 'modificado').length || 0), 0)} mod. · {actuaciones.reduce((acc, a) => acc + (a.documentos?.filter((d) => d.categoria === 'certificaciones').length || 0), 0)} cert.
+                </div>
+                <span className="text-[10px] text-slate-500 mt-0.5 block truncate">
+                  Libro de auditoría íntegro
+                </span>
+              </div>
+            </div>
+
+            {/* Notificación de Confirmación de Descarga Exitosa */}
+            {estadoExportacionMasiva && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-start gap-3 animate-in fade-in">
+                <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                <div className="space-y-1 flex-1 text-xs">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="font-bold text-emerald-900">
+                      Archivo de respaldo descargado correctamente: <code className="px-1.5 py-0.5 bg-emerald-100 rounded text-[11px] font-mono text-emerald-950">{estadoExportacionMasiva.nombreArchivo}</code>
+                    </span>
+                    <span className="text-[11px] text-emerald-800 font-mono">
+                      {(estadoExportacionMasiva.tamanoBytes / 1024).toFixed(1)} KB · {new Date(estadoExportacionMasiva.fechaExportacion).toLocaleTimeString('es-ES')}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Se han respaldado con éxito <strong>{estadoExportacionMasiva.totalPlanes} planes</strong>, <strong>{estadoExportacionMasiva.totalActuaciones} actuaciones</strong>, <strong>{estadoExportacionMasiva.totalDocumentosBase14} documentos Base 14</strong>, <strong>{estadoExportacionMasiva.totalModificados} modificados</strong> y <strong>{estadoExportacionMasiva.totalCertificaciones} certificaciones</strong> con un presupuesto total consolidado de <strong>{formatearMoneda(estadoExportacionMasiva.importeTotalPresupuestos)}</strong>. Tus datos están completamente a salvo en almacenamiento local para proceder con la migración a Firestore.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tarjeta Institucional: Papelera de Reciclaje y Custodia de 30 Días */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-white border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center shrink-0 shadow-2xs">
+                <Archive className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">
+                    Papelera de Reciclaje de Planes
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+                    Custodia 30 días naturales
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                  Garantía de seguridad para administradores: cualquier plan borrado por error se almacena protegido durante 30 días con todas sus actuaciones y documentos Base 14, permitiendo su restauración completa o purga definitiva.
+                </p>
+                <div className="pt-1 flex items-center gap-4 text-xs font-bold text-slate-700">
+                  <span>
+                    Planes en custodia: <strong className="text-slate-900 font-black">{planesPapelera.length}</strong>
+                  </span>
+                  <span>•</span>
+                  <span>
+                    Actuaciones respaldadas:{' '}
+                    <strong className="text-[#004F90] font-black">
+                      {planesPapelera.reduce((acc, c) => acc + (c.actuacionesAsociadas?.length || c.plan.actuacionesPrevistas?.length || 0), 0)}
+                    </strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={abrirModalPapelera}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black shadow-2xs transition shrink-0 self-start md:self-center active:scale-[0.98]"
+              title="Abrir la Papelera de reciclaje global de planes"
+            >
+              <Archive className="w-4 h-4" />
+              <span>Abrir Papelera ({planesPapelera.length})</span>
+            </button>
+          </div>
+
           {/* Métricas de Actividad Diaria */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -438,9 +651,6 @@ export const AdminPanel: React.FC = () => {
                         <div>
                           <span className="text-xs font-bold text-slate-900 dark:text-white">
                             {plan.nombre}
-                          </span>
-                          <span className="ml-2 text-[10px] font-mono text-blue-600 dark:text-blue-400">
-                            ({plan.codigo})
                           </span>
                         </div>
                         <span className="text-xs font-black text-slate-900 dark:text-white">
@@ -578,7 +788,9 @@ export const AdminPanel: React.FC = () => {
                         >
                           <option value="jefe_servicio">Jefe de Servicio (Admin)</option>
                           <option value="tecnico">Técnico Revisor</option>
+                          <option value="administrativo">Personal Administrativo</option>
                           <option value="auditor">Auditor / Control</option>
+                          <option value="consulta">Personal de Consulta (Lectura restringida)</option>
                         </select>
                       </td>
 
@@ -946,7 +1158,9 @@ export const AdminPanel: React.FC = () => {
                 >
                   <option value="tecnico">Técnico Revisor</option>
                   <option value="jefe_servicio">Jefe de Servicio (Administrador)</option>
+                  <option value="administrativo">Personal Administrativo</option>
                   <option value="auditor">Auditor / Control Financiero</option>
+                  <option value="consulta">Personal de Consulta (Lectura restringida)</option>
                 </select>
               </div>
 
@@ -1108,6 +1322,12 @@ export const AdminPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal oficial de Migración y Backup de Firebase */}
+      <ModalMigracionFirebase
+        mostrar={mostrarModalMigracion}
+        onCerrar={() => setMostrarModalMigracion(false)}
+      />
     </div>
   );
 };

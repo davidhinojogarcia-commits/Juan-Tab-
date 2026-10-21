@@ -14,6 +14,8 @@ import { AuthModal } from './components/AuthModal';
 import { NuevaActuacionModal } from './components/NuevaActuacionModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { MobileCompatibilityModal } from './components/MobileCompatibilityModal';
+import { PapeleraReciclajeModal } from './components/PapeleraReciclajeModal';
+import { ResumenActuacionesD3 } from './components/ResumenActuacionesD3';
 import { WifiOff, ShieldCheck, Heart } from 'lucide-react';
 
 const MainContent: React.FC = () => {
@@ -23,11 +25,13 @@ const MainContent: React.FC = () => {
     alertaCamposIncompletos,
     cerrarAlertaCampos,
     confirmarSaltoForzado,
-    isOnline
+    isOnline,
+    modalPapeleraAbierto,
+    cerrarModalPapelera
   } = useApp();
 
-  const [vistaActual, setVistaActual] = useState<'planes' | 'actuaciones' | 'dashboard' | 'admin' | 'auditoria'>('planes');
-  const [vistaOrigen, setVistaOrigen] = useState<'planes' | 'actuaciones' | 'dashboard'>('planes');
+  const [vistaActual, setVistaActual] = useState<'planes' | 'actuaciones' | 'estado' | 'dashboard' | 'admin' | 'auditoria'>('planes');
+  const [vistaOrigen, setVistaOrigen] = useState<'planes' | 'actuaciones' | 'estado' | 'dashboard'>('planes');
   const [modalAuditoriaAbierto, setModalAuditoriaAbierto] = useState(false);
   const [modalAjustesAbierto, setModalAjustesAbierto] = useState(false);
   const [modalAuthAbierto, setModalAuthAbierto] = useState(false);
@@ -82,6 +86,16 @@ const MainContent: React.FC = () => {
                 seleccionarActuacion(id);
               }}
             />
+          ) : vistaActual === 'estado' ? (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              <ResumenActuacionesD3
+                onVerActuaciones={() => {
+                  setVistaOrigen('estado');
+                  setVistaActual('actuaciones');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              />
+            </div>
           ) : vistaActual === 'dashboard' ? (
             <Dashboard
               onAbrirActuacion={(id) => {
@@ -176,6 +190,12 @@ const MainContent: React.FC = () => {
           seleccionarActuacion(id);
           setVistaActual('actuaciones');
         }}
+      />
+
+      {/* Papelera de Reciclaje Global de Planes (Custodia 30 días) */}
+      <PapeleraReciclajeModal
+        mostrar={modalPapeleraAbierto}
+        onCerrar={cerrarModalPapelera}
       />
     </div>
   );

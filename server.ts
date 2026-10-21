@@ -248,17 +248,27 @@ app.post('/api/extract-anexo-eell', async (req, res) => {
       return res.json({ fallback: true, message: 'Gemini no configurado en entorno' });
     }
 
-    const prompt = `Actúa como especialista técnico de la Diputación Provincial de Cádiz.
-Analiza el documento o tabla que contiene el "ANEXO DE INVERSIONES / ACTUACIONES DE CADA EELL" para el plan "${planNombre || 'Plan Provincial'}".
-Extrae con total exactitud TODAS las actuaciones por entidad local sin omitir ninguna:
-- "numero": Número de actuación correlativo ("01", "02", ...).
-- "entidadLocal": Municipio o ELA de Cádiz.
-- "titulo": Título / denominación literal del proyecto o inversión.
-- "aplicacionPresupuestaria": Partida presupuestaria (ej: "2026-03-920-46200").
-- "subvencionSolicitada": Importe de la subvención en euros (número).
+    const prompt = `Actúa como especialista técnico y administrativo de la Diputación Provincial de Cádiz.
+Analiza con total rigor administrativo y precisión el documento, tabla o anexo con la relación de actuaciones e inversiones de las Entidades Locales para el plan "${planNombre || 'Plan Provincial'}".
 
-Documento: ${filename || 'Anexo_Inversiones_EELL.pdf'}
-${text ? `\nTexto:\n${text.slice(0, 80000)}` : ''}
+REGLAS ESTRICTAS DE EXTRACCIÓN Y MAPEO DE COLUMNAS (100% OBLIGATORIO):
+El archivo contiene tablas con las siguientes columnas oficiales que debes mapear exactamente:
+1. "Nº ACT." (primera columna, también identificada como "Nº", "Nº ACTUACIÓN", "NÚMERO"):
+   -> Extrae su valor en el campo "numero" (columna NÚMERO de la app). Formato de dos dígitos ("01", "02", etc.) o el código oficial asignado.
+2. "ENTIDAD LOCAL" (columna identificada como "ENTIDAD LOCAL", "EELL", "MUNICIPIO", "AYUNTAMIENTO"):
+   -> Extrae su valor en el campo "entidadLocal" (columna EELL de la app). Nombre oficial del municipio o ELA de la provincia de Cádiz (ej: Grazalema, Vejer de la Frontera, Ubrique, Barbate, Tarifa, Arcos de la Frontera, Medina Sidonia, Olvera, Alcalá de los Gazules, Benalup-Casas Viejas, etc.).
+3. "ACTUACIÓN" (columna identificada como "ACTUACIÓN", "TÍTULO DE LA ACTUACIÓN", "DENOMINACIÓN", "PROYECTO", "OBRA"):
+   -> Extrae su valor en el campo "titulo" (columna TÍTULO DE LA ACTUACIÓN de la app). Título íntegro, literal y completo del proyecto u obra.
+4. "APLICACIÓN PRESUPUESTARIA" (columna identificada como "APLICACIÓN PRESUPUESTARIA", "APLICACION PPTARIA", "PARTIDA"):
+   -> Extrae su valor en el campo "aplicacionPresupuestaria" (columna APLICACIÓN PRESUPUESTARIA de la app). Ejemplo: "2026-03-920-46200".
+5. "SUBVENCIÓN SOLICITADA A DIPUTACION" (columna identificada como "SUBVENCIÓN SOLICITADA A DIPUTACION", "SUBVENCIÓN SOLICITADA", "SUBVENCIÓN", "IMPORTE SOLICITADO"):
+   -> Extrae su valor en el campo "subvencionSolicitada" (columna IMPORTE de la app, número flotante o entero en euros, sin el símbolo € ni puntos de miles).
+
+MANDATO CRÍTICO:
+Debes extraer ABSOLUTAMENTE TODAS las filas de actuaciones sin omitir ninguna sola fila, sin truncar y sin usar puntos suspensivos ("...").
+
+Documento: ${filename || 'Relacion_Actuaciones_EELL.pdf'}
+${text ? `\nTexto completo o tabla extraída:\n${text.slice(0, 80000)}` : ''}
 `;
 
     const contents: any[] = [];
