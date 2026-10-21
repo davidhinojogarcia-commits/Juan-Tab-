@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useWorkspace } from '../sync/Workspace';
+import { encode, type SyncStatus } from '../sync/engine';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
 import {
   Actuacion,
   DocumentoActuacion,
@@ -49,7 +51,7 @@ interface AppContextType {
   comentarios: ComentarioActuacion[];
 
   // Estados de interfaz y red
-  estadoSincronizacion: 'sincronizado' | 'guardando' | 'offline';
+  estadoSincronizacion: SyncStatus;
   isOnline: boolean;
   alertaCamposIncompletos: {
     mostrar: boolean;
@@ -199,22 +201,7 @@ const STORAGE_KEYS = {
   COMENTARIOS: 'adl_cadiz_comentarios_v2'
 };
 
-// Limpieza automática de claves anteriores que contenían datos de demostración o inventados
-if (typeof window !== 'undefined') {
-  try {
-    const viejasClaves = [
-      'adl_cadiz_actuaciones_v1.1',
-      'adl_cadiz_planes_v1.1',
-      'adl_cadiz_comentarios_v1.1',
-      'adl_cadiz_auditoria_v1.1',
-      'adl_cadiz_notificaciones_v1.1',
-      'adl_cadiz_actuaciones_v1',
-      'adl_cadiz_planes_v1'
-    ];
-    viejasClaves.forEach((k) => localStorage.removeItem(k));
-  } catch {}
-}
-
+// Los datos locales anteriores se conservan para exportación e importación explícita.
 const FILTROS_DEFECTO: FiltrosBusqueda = {
   plan: '',
   entidadLocal: '',
@@ -235,199 +222,25 @@ const CONFIG_DEFECTO: ConfiguracionUsuario = {
   recordatoriosEmailDiarios: true,
   alertasVencimientoDias: 30,
   sincronizacionNubeAutomatica: true,
-  cifradoExtremoAExtremo: true,
+  cifradoExtremoAExtremo: false,
   modoOscuro: 'light',
-  autenticacionBiometrica: true,
-  autenticacion2FA: true
+  autenticacionBiometrica: false,
+  autenticacion2FA: false
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // 1. Cargar Usuarios
-  const [usuarios, setUsuarios] = useState<User[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.USUARIOS);
-      if (guardado) {
-        const parsed: User[] = JSON.parse(guardado);
-        // Garantizar que el Jefe de Servicio es JUAN HINOJO GARCÍA
-        return parsed.map((u) => {
-          if (u.id === 'usr-jefe-1' || u.rol === 'jefe_servicio') {
-            return {
-              ...u,
-              nombre: 'Juan',
-              apellidos: 'Hinojo García',
-              email: 'juan.tabu.oficial@gmail.com'
-            };
-          }
-          return u;
-        });
-      }
-      return USUARIOS_INICIALES;
-    } catch {
-      return USUARIOS_INICIALES;
-    }
-  });
-
-  // 2. Usuario activo (autenticación automática garantizada: JUAN HINOJO GARCÍA - Jefe de Servicio)
-  const [usuarioActual, setUsuarioActual] = useState<User>(() => {
-    const jefeOficial: User = {
-      id: 'usr-jefe-1',
-      nombre: 'Juan',
-      apellidos: 'Hinojo García',
-      nif: '28765432Z',
-      email: 'juan.tabu.oficial@gmail.com',
-      rol: 'jefe_servicio',
-      departamento: 'Área de Desarrollo Local',
-      cargo: 'Jefe del Servicio de Asistencia Técnica y Obras',
-      telefono: '+34 956 240 100',
-      biometriaHabilitada: true,
-      dosFactoresHabilitado: true,
-      activo: true,
-      fechaAlta: '2024-01-10',
-      permisos: {
-        puedeEditarPlanes: true,
-        puedeAsignarTecnicos: true,
-        puedeCalificarDocumentos: true,
-        puedeExportarInformes: true,
-        puedeEnviarComentarios: true,
-        puedeGestionarUsuarios: true
-      },
-      ultimoAcceso: new Date().toISOString()
-    };
-
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.USUARIO_ACTUAL);
-      if (guardado) {
-        const u = JSON.parse(guardado);
-        if (u && (u.id === 'usr-jefe-1' || u.rol === 'jefe_servicio' || u.email?.includes('juan'))) {
-          return { ...u, ...jefeOficial };
-        }
-        if (u && u.id) return u;
-      }
-    } catch {}
-
-    try {
-      localStorage.setItem(STORAGE_KEYS.USUARIO_ACTUAL, JSON.stringify(jefeOficial));
-    } catch {}
-    return jefeOficial;
-  });
-
-  // 3. Actuaciones
-  const [actuaciones, setActuaciones] = useState<Actuacion[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.ACTUACIONES);
-      if (guardado) {
-        const parsed: Actuacion[] = JSON.parse(guardado);
-        const mapeados: Actuacion[] = parsed.map((a, i) => {
-          let docs = a.documentos || [];
-          const tieneSolicitud = docs.some((d) => d.codigo === 'ANX-I');
-          if (!tieneSolicitud) {
-            const docsSolicitud = PLANTILLA_DOCUMENTOS_SOLICITUD.map((p, idx) => ({
-              ...p,
-              orden: idx + 1,
-              metadatos: {
-                importeInicial: null,
-                importeUltima: null,
-                fechaExpedicionInicial: '',
-                fechaExpedicionUltima: '',
-                fechaRegistroInicial: '',
-                fechaRegistroUltima: '',
-                fechaAprobacionInicial: '',
-                fechaAprobacionUltima: '',
-                fechaRegistroAprobacionInicial: '',
-                fechaRegistroAprobacionUltima: '',
-                estadoJustificacion: 'Pendiente de calificar' as const,
-                observacionesGenerales: ''
-              },
-              camposRevisar: generarChecklistPorDefecto(p.id, p.codigo),
-              revisadoCompleto: false,
-              tieneDeficiencias: false
-            }));
-            const docsBase14 = docs.map((d, idx) => ({
-              ...d,
-              orden: idx + 5,
-              fase: 'justificacion' as const
-            }));
-            docs = [...docsSolicitud, ...docsBase14];
-          }
-
-          // Asegurar que siempre exista la Pestaña Proyecto Técnico (PROY-OBRA)
-          const tieneProyecto = docs.some((d) => d.codigo === 'PROY-OBRA' || d.categoria === 'proyecto');
-          if (!tieneProyecto) {
-            const docProy: DocumentoActuacion = {
-              id: `doc-proy-auto-${a.id || i}`,
-              orden: 5,
-              codigo: 'PROY-OBRA',
-              titulo: 'Proyecto Técnico / Memoria Valorada de las Obras',
-              subtitulo: 'Memoria descriptiva y constructiva, planos acotados, pliego de prescripciones técnicas y presupuesto con mediciones',
-              categoria: 'proyecto',
-              fase: 'solicitud',
-              metadatos: {
-                importeInicial: null,
-                importeUltima: null,
-                fechaExpedicionInicial: '',
-                fechaExpedicionUltima: '',
-                fechaRegistroInicial: '',
-                fechaRegistroUltima: '',
-                fechaAprobacionInicial: '',
-                fechaAprobacionUltima: '',
-                fechaRegistroAprobacionInicial: '',
-                fechaRegistroAprobacionUltima: '',
-                estadoJustificacion: 'Pendiente de calificar' as const,
-                observacionesGenerales: ''
-              },
-              camposRevisar: generarChecklistPorDefecto(`doc-proy-auto-${a.id || i}`, 'PROY-OBRA'),
-              revisadoCompleto: false,
-              tieneDeficiencias: false
-            };
-            const idxAnx4 = docs.findIndex((d) => d.codigo === 'ANX-IV');
-            if (idxAnx4 !== -1) {
-              docs.splice(idxAnx4 + 1, 0, docProy);
-            } else {
-              docs.unshift(docProy);
-            }
-            docs = docs.map((d, dIdx) => ({ ...d, orden: dIdx + 1 }));
-          }
-
-          return {
-            ...a,
-            documentos: docs,
-            faseActual: a.faseActual || 'solicitud',
-            aplicacionPresupuestaria: a.aplicacionPresupuestaria || `202${4 + (i % 4)}-03-920-4620${i}`
-          };
-        });
-
-        // Garantizar que no existan IDs duplicados al cargar de LocalStorage
-        const idsVistos = new Set<string>();
-        return mapeados.map((act, idx) => {
-          let uId = act.id;
-          if (!uId || idsVistos.has(uId)) {
-            uId = `${uId || 'act'}-${idx + 1}`;
-          }
-          idsVistos.add(uId);
-          return { ...act, id: uId };
-        });
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  });
-
+  const shared = useWorkspace();
+  const usuarioActual = shared.user;
+  const usuarios = useMemo(() => [shared.user], [shared.user.id, shared.user.rol]);
+  const [actuaciones, setActuaciones] = useState<Actuacion[]>(() => shared.payload.actuaciones as Actuacion[]);
   // 4. Actuación seleccionada y pestaña de documento activa
   const [actuacionActivaId, setActuacionActivaId] = useState<string | null>(null);
   const [documentoActivoIndex, setDocumentoActivoIndex] = useState<number>(0);
 
   // 5. Auditoría
-  const [registrosAuditoria, setRegistrosAuditoria] = useState<RegistroAuditoriaAcceso[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.AUDITORIA);
-      return guardado ? JSON.parse(guardado) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [registrosAuditoria, setRegistrosAuditoria] = useState<RegistroAuditoriaAcceso[]>(() => shared.payload.registrosAuditoria as RegistroAuditoriaAcceso[]);
 
   // 6. Configuración
   const [configuracion, setConfiguracion] = useState<ConfiguracionUsuario>(() => {
@@ -455,67 +268,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   // 8. Filtros
   const [filtros, setFiltros] = useState<FiltrosBusqueda>(FILTROS_DEFECTO);
 
-  // 9. Planes de Subvenciones
-  const [planes, setPlanes] = useState<PlanSubvencion[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.PLANES);
-      if (guardado) {
-        const parsed: PlanSubvencion[] = JSON.parse(guardado);
-        if (Array.isArray(parsed)) return parsed;
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  });
-
-  // 9b. Papelera de Planes y Copias de Seguridad para recuperación (30 días de custodia)
-  const [planesPapelera, setPlanesPapelera] = useState<CopiaSeguridadPlan[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.PLANES_PAPELERA);
-      if (guardado) {
-        const parsed: CopiaSeguridadPlan[] = JSON.parse(guardado);
-        if (Array.isArray(parsed)) {
-          const ahora = Date.now();
-          return parsed
-            .map((c) => ({
-              ...c,
-              diasRetencion: c.diasRetencion || 30,
-              fechaExpiracion:
-                c.fechaExpiracion ||
-                new Date(new Date(c.fechaBorrado).getTime() + (c.diasRetencion || 30) * 86400000).toISOString()
-            }))
-            .filter((c) => {
-              const exp = new Date(c.fechaExpiracion).getTime();
-              return exp > ahora;
-            });
-        }
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  });
-
+  const [planes, setPlanes] = useState<PlanSubvencion[]>(() => shared.payload.planes as PlanSubvencion[]);
+  const [planesPapelera, setPlanesPapelera] = useState<CopiaSeguridadPlan[]>(() => (shared.payload.planesPapelera ?? []) as CopiaSeguridadPlan[]);
+  const [comentarios, setComentarios] = useState<ComentarioActuacion[]>(() => shared.payload.comentarios as ComentarioActuacion[]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const estadoSincronizacion = shared.status;
+  const localPayload = useMemo(() => ({ actuaciones, planes, comentarios, registrosAuditoria, planesPapelera }), [actuaciones, planes, comentarios, registrosAuditoria, planesPapelera]);
+  const remotePayload = JSON.stringify(shared.payload);
+  const displayed = useRef({ payload: encode(shared.payload), revision: shared.engine.state.confirmed.revision });
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.PLANES_PAPELERA, JSON.stringify(planesPapelera));
-    } catch {}
-  }, [planesPapelera]);
-
-  // 10. Comentarios y Notificaciones por Correo a Técnicos
-  const [comentarios, setComentarios] = useState<ComentarioActuacion[]>(() => {
-    try {
-      const guardado = localStorage.getItem(STORAGE_KEYS.COMENTARIOS);
-      return guardado ? JSON.parse(guardado) : COMENTARIOS_INICIALES;
-    } catch {
-      return COMENTARIOS_INICIALES;
+    let local: string;
+    try { local = encode(localPayload); } catch (error) { shared.engine.fail(error); return; }
+    const remote = encode(shared.payload);
+    if (local !== displayed.current.payload) {
+      if (shared.user.rol === 'auditor') {
+        shared.engine.fail(new Error('Tu cuenta tiene acceso de consulta. Los cambios no se guardarán.'));
+        return;
+      }
+      const revision = displayed.current.revision;
+      displayed.current.payload = local;
+      void shared.engine.stage(localPayload, revision).catch(() => {});
+    } else if (remote !== displayed.current.payload) {
+      displayed.current = { payload: remote, revision: shared.engine.state.confirmed.revision };
+      setActuaciones(shared.payload.actuaciones as Actuacion[]);
+      setPlanes(shared.payload.planes as PlanSubvencion[]);
+      setComentarios(shared.payload.comentarios as ComentarioActuacion[]);
+      setRegistrosAuditoria(shared.payload.registrosAuditoria as RegistroAuditoriaAcceso[]);
+      setPlanesPapelera((shared.payload.planesPapelera ?? []) as CopiaSeguridadPlan[]);
+    } else {
+      displayed.current.revision = shared.engine.state.confirmed.revision;
     }
-  });
-
-  // 11. Estado de Red y Sincronización
-  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
-  const [estadoSincronizacion, setEstadoSincronizacion] = useState<'sincronizado' | 'guardando' | 'offline'>('sincronizado');
+  }, [localPayload, remotePayload]);
 
   // 12. Alerta de bloqueo por campos sin revisar
   const [alertaCamposIncompletos, setAlertaCamposIncompletos] = useState<{
@@ -532,23 +315,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Listeners de Red (Online / Offline)
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      setEstadoSincronizacion('guardando');
-      setTimeout(() => setEstadoSincronizacion('sincronizado'), 800);
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      setEstadoSincronizacion('offline');
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    const online = () => setIsOnline(true); const offline = () => setIsOnline(false);
+    window.addEventListener('online', online); window.addEventListener('offline', offline);
+    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
   }, []);
 
   // Modo de color de la interfaz: Forzado a Modo Claro según especificación oficial
@@ -561,49 +330,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [configuracion.modoOscuro]);
 
-  // Persistencia automática en LocalStorage
-  useEffect(() => {
-    setEstadoSincronizacion('guardando');
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACTUACIONES, JSON.stringify(actuaciones));
-    } catch (e) {
-      console.error('Error guardando actuaciones en storage:', e);
-    }
-    const timer = setTimeout(() => {
-      setEstadoSincronizacion(isOnline ? 'sincronizado' : 'offline');
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [actuaciones, isOnline]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USUARIOS, JSON.stringify(usuarios));
-  }, [usuarios]);
-
-  useEffect(() => {
-    if (usuarioActual) {
-      localStorage.setItem(STORAGE_KEYS.USUARIO_ACTUAL, JSON.stringify(usuarioActual));
-    }
-  }, [usuarioActual]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.AUDITORIA, JSON.stringify(registrosAuditoria));
-  }, [registrosAuditoria]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(configuracion));
-  }, [configuracion]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.NOTIFICACIONES, JSON.stringify(notificaciones));
-  }, [notificaciones]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.PLANES, JSON.stringify(planes));
-  }, [planes]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.COMENTARIOS, JSON.stringify(comentarios));
-  }, [comentarios]);
+  // Shared records are persisted by the durable queue. Keep legacy keys intact for migration.
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(configuracion)); }, [configuracion]);
+  useEffect(() => { localStorage.setItem(STORAGE_KEYS.NOTIFICACIONES, JSON.stringify(notificaciones)); }, [notificaciones]);
 
   // Chequeo periódico de vencimientos y generación de alertas
   useEffect(() => {
@@ -645,7 +374,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       accion,
       detalles: detalles || undefined,
       dispositivo: `${navigator.platform} · ${navigator.userAgent.includes('Mobile') ? 'Móvil' : 'Escritorio'}`,
-      ip: '192.168.10.45 (Red Corporativa DipuCádiz)'
+      ip: 'No registrada'
     };
 
     setRegistrosAuditoria((prev) => [nuevoRegistro, ...prev]);
@@ -1736,7 +1465,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Crear nueva actuación
   const crearNuevaActuacion = (datos: Partial<Actuacion>): Actuacion => {
-    const id = `ACT-2026-${String(actuaciones.length + 1).padStart(3, '0')}`;
+    const id = `act-${crypto.randomUUID()}`;
     const nueva: Actuacion = {
       id,
       numero: datos.numero || String(actuaciones.length + 1).padStart(2, '0'),
@@ -1801,7 +1530,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   // Gestión de Planes de Subvenciones
   const crearPlan = (datos: Omit<PlanSubvencion, 'id' | 'fechaCreacion'>): PlanSubvencion => {
-    const nuevoId = `plan-${Date.now()}`;
+    const nuevoId = `plan-${crypto.randomUUID()}`;
     const nuevo: PlanSubvencion = {
       ...datos,
       id: nuevoId,
@@ -1963,7 +1692,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       );
       if (yaExiste) return prevista;
 
-      const actId = `ACT-${plan.ejercicio}-${String(actuaciones.length + creadas + 1).padStart(3, '0')}`;
+      const actId = `act-${crypto.randomUUID()}`;
       const nueva: Actuacion = {
         id: actId,
         numero: prevista.numero,
@@ -2041,7 +1770,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const nuevasPrevistas: ActuacionEnPlan[] = [...(plan.actuacionesPrevistas || [])];
 
     actuacionesParsed.forEach((parsedItem, idx) => {
-      const actId = `ACT-${plan.ejercicio}-${String(actuaciones.length + idx + 1).padStart(3, '0')}`;
+      const actId = `act-${crypto.randomUUID()}`;
       const numFormatted = parsedItem.numero || String(nuevasPrevistas.length + 1).padStart(2, '0');
 
       const nuevaAct: Actuacion = {
@@ -2155,7 +1884,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const plan = planes.find((p) => p.id === planId);
     const nombrePlan = plan ? plan.nombre : 'Plan Provincial';
     const ejercicio = plan ? plan.ejercicio : 2026;
-    const actId = `ACT-${ejercicio}-${String(actuaciones.length + 1).padStart(3, '0')}`;
+    const actId = `act-${crypto.randomUUID()}`;
 
     const nuevaAct: Actuacion = {
       id: actId,
@@ -2353,7 +2082,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }[],
     vincularPlanId?: string
   ): { plan: PlanSubvencion; totalCreadas: number } => {
-    const nuevoId = vincularPlanId || `plan-${Date.now()}`;
+    const nuevoId = vincularPlanId || `plan-${crypto.randomUUID()}`;
     const ejercicio = Number(datosPlan.ejercicio) || new Date().getFullYear();
     const nombre = (datosPlan.nombre || `Plan Provincial ${ejercicio}`).trim();
     const codigo = (datosPlan.codigo || `${nombre.slice(0, 3).toUpperCase()}-${ejercicio}`).trim();
@@ -2440,7 +2169,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           ];
 
     listaFinalActuaciones.forEach((parsedItem, idx) => {
-      const actId = `ACT-${ejercicio}-${String(actuaciones.length + idx + 1).padStart(3, '0')}`;
+      const actId = `act-${crypto.randomUUID()}`;
       const numRaw = parsedItem.numero || String(idx + 1).padStart(2, '0');
       const numFormatted = numRaw.replace(/^N[ºo°\.\s]*/i, '').trim();
       const rawEell = (parsedItem.entidadLocal || 'Diputación de Cádiz').trim();
@@ -2554,7 +2283,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const autor = usuarioActual || usuarios[0];
 
     const nuevoComentario: ComentarioActuacion = {
-      id: `com-${Date.now()}`,
+      id: `com-${crypto.randomUUID()}`,
       actuacionId,
       actuacionNumero: act ? act.numero : '---',
       actuacionTitulo: act ? act.titulo : 'Actuación',
@@ -2624,27 +2353,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Usuarios
-  const cambiarUsuarioActivo = (usuarioId: string) => {
-    const usr = usuarios.find((u) => u.id === usuarioId);
-    if (usr) {
-      setUsuarioActual(usr);
-    }
-  };
-
-  const actualizarUsuario = (usuario: User) => {
-    setUsuarios((prev) => prev.map((u) => (u.id === usuario.id ? usuario : u)));
-    if (usuarioActual?.id === usuario.id) {
-      setUsuarioActual(usuario);
-    }
-  };
-
-  const crearUsuario = (datos: Omit<User, 'id'>) => {
-    const nuevoUsuario: User = {
-      ...datos,
-      id: `usr-${Date.now()}`
-    };
-    setUsuarios((prev) => [...prev, nuevoUsuario]);
-  };
+  // The Firebase identity and server-managed membership cannot be changed by the local directory.
+  const cambiarUsuarioActivo = (_usuarioId: string) => {};
+  const actualizarUsuario = (_usuario: User) => { shared.engine.fail(new Error('Gestiona las cuentas y sus permisos en Firebase.')); };
+  const crearUsuario = (_datos: Omit<User, 'id'>) => { shared.engine.fail(new Error('Gestiona las cuentas y sus permisos en Firebase.')); };
 
   // Configuración
   const actualizarConfiguracion = (config: Partial<ConfiguracionUsuario>) => {
@@ -2663,26 +2375,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // Forzar sincronización manual
-  const forzarSincronizacion = async () => {
-    setEstadoSincronizacion('guardando');
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setEstadoSincronizacion(isOnline ? 'sincronizado' : 'offline');
-  };
-
-  // Reiniciar datos de fábrica
-  const reiniciarDatosFabrica = () => {
-    localStorage.removeItem(STORAGE_KEYS.ACTUACIONES);
-    localStorage.removeItem(STORAGE_KEYS.AUDITORIA);
-    localStorage.removeItem(STORAGE_KEYS.PLANES);
-    localStorage.removeItem(STORAGE_KEYS.COMENTARIOS);
-    localStorage.removeItem(STORAGE_KEYS.NOTIFICACIONES);
-    setActuaciones([]);
-    setPlanes([]);
-    setComentarios([]);
-    setNotificaciones([]);
-    setRegistrosAuditoria([]);
-    setActuacionActivaId(null);
-  };
+  const forzarSincronizacion = () => shared.engine.flush();
+  const reiniciarDatosFabrica = () => { shared.engine.fail(new Error('No se pueden sustituir los datos compartidos por datos de demostración.')); };
 
   return (
     <AppContext.Provider
